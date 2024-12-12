@@ -1,23 +1,25 @@
 import torch
 import torch.nn as nn
 from models.resnet_se import ResNetSE
-from models.attention_se import DistortionAttention, HardNegativeCrossAttention
+from models.attention_se import DistortionAttention
 
+
+# simclr.py
 class SimCLR(nn.Module):
     def __init__(self, encoder_params=None, embedding_dim=128, temperature=0.5):
         super(SimCLR, self).__init__()
-        self.temperature = temperature  # Add temperature parameter
-        
+        self.temperature = temperature
+
         # Initialize ResNet-SE with encoder parameters
-        self.backbone = ResNetSE(encoder_params)  # ResNet-50 with SE
-        
+        self.backbone = ResNetSE(encoder_params)
+
         # Projection head
         self.projector = nn.Sequential(
             nn.Linear(2048, 2048),
             nn.ReLU(),
             nn.Linear(2048, embedding_dim)
         )
-        
+
         # Attention mechanism
         self.attention = DistortionAttention(2048)
 
@@ -34,7 +36,7 @@ class SimCLR(nn.Module):
             return proj_A, proj_B
 
         return proj_A
-    
+
     def compute_loss(self, proj_A, proj_B, proj_negatives):
         # Positive similarity
         positive_similarity = torch.exp(torch.sum(proj_A * proj_B, dim=1) / self.temperature)
@@ -48,4 +50,3 @@ class SimCLR(nn.Module):
         # NT-Xent loss
         loss = -torch.mean(torch.log(positive_similarity / denom))
         return loss
-

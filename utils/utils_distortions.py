@@ -365,29 +365,19 @@ def apply_random_distortions(images, shared_distortion=None, return_info=False):
 
 
 def generate_hard_negatives(img, scale_factor=0.5):
-    """
-    Generate hard negatives by downscaling the input image.
+    # Ensure img is 5D
+    if img.dim() == 4:  # [batch_size, C, H, W]
+        img = img.unsqueeze(1)  # Convert to [batch_size, 1, C, H, W]
 
-    Args:
-        img (torch.Tensor): Input image tensor of shape [batch_size, num_crops, C, H, W].
-        scale_factor (float): Scaling factor for downscaling.
-
-    Returns:
-        torch.Tensor: Downscaled image tensor of shape [batch_size, num_crops, C, new_H, new_W].
-    """
     batch_size, num_crops, C, H, W = img.size()
-    new_H, new_W = int(H * scale_factor), int(W * scale_factor)
+    downscaled_size = (int(H * scale_factor), int(W * scale_factor))
 
-    # View 전에 contiguous() 호출
-    img = img.contiguous().view(-1, C, H, W)  # Flatten (batch_size * num_crops, C, H, W)
+    # Downscale each crop
+    hard_negatives = torch.zeros(batch_size, num_crops, C, *downscaled_size, device=img.device)
+    for i in range(num_crops):
+        hard_negatives[:, i] = F.interpolate(img[:, i], size=downscaled_size, mode='bilinear', align_corners=False)
 
-    # Resize images
-    downscaled_imgs = nn.functional.interpolate(img, size=(new_H, new_W), mode='bilinear', align_corners=False)
-
-    # Reshape back to original dimensions
-    downscaled_imgs = downscaled_imgs.view(batch_size, num_crops, C, new_H, new_W)
-
-    return downscaled_imgs
+    return hard_negatives
 
 
 
