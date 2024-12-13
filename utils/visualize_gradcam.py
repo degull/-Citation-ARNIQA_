@@ -1,3 +1,5 @@
+# ver1
+""" 
 import torch
 import torch.nn as nn
 
@@ -23,3 +25,24 @@ class GradCAM:
         weights = self.gradients.mean(dim=(2, 3), keepdim=True)
         cam = (weights * target_activation).sum(dim=1, keepdim=True)
         return cam
+
+ """
+
+# ver2
+import torch
+import matplotlib.pyplot as plt
+
+def visualize_se_attention(features, se_weights, attention_map, title="SE Attention Visualization"):
+    se_attention_map = features.mean(dim=1, keepdim=True) * se_weights.unsqueeze(2).unsqueeze(3) * attention_map
+    se_attention_map = se_attention_map.squeeze().cpu().numpy()
+    se_attention_map -= se_attention_map.min()
+    se_attention_map /= se_attention_map.max()
+
+    plt.figure(figsize=(10, 8))
+    plt.imshow(se_attention_map, cmap='jet')
+    plt.title(title)
+    plt.colorbar()
+    plt.show()
+
+
+# visualize_gradcam.py

@@ -23,6 +23,7 @@ from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm
 from pathlib import Path
 import random
+import matplotlib.pyplot as plt
 
 # Config loader
 def load_config(config_path: str) -> DotMap:
@@ -54,6 +55,15 @@ def calculate_srcc_plcc(proj_A, proj_B):
     srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
     plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
     return srocc, plcc
+
+def debug_ridge_regressor(embeddings, mos_scores):
+    plt.figure(figsize=(8, 6))
+    plt.scatter(embeddings[:, 0], mos_scores, alpha=0.7)
+    plt.xlabel('Embedding Feature 0')
+    plt.ylabel('MOS Scores')
+    plt.title('Embedding vs MOS Scores')
+    plt.grid()
+    plt.show()
 
 def validate(args, model, dataloader, device):
     model.eval()
@@ -124,11 +134,17 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
 
             optimizer.zero_grad()
 
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast(device_type='cuda'):
                 proj_A, proj_B = model(inputs_A, inputs_B)
                 proj_A = F.normalize(proj_A, dim=1)
                 proj_B = F.normalize(proj_B, dim=1)
-                loss = model.compute_loss(proj_A, proj_B, proj_negatives)
+
+                # Calculate SE weights from features_A
+                features_A = model.backbone(inputs_A)
+                se_weights = features_A.mean(dim=[2, 3])  # Calculate SE weights
+
+                # Compute loss with SE weights
+                loss = model.compute_loss(proj_A, proj_B, proj_negatives, se_weights)
 
             # Debugging: Check for NaN/Inf values
             if torch.isnan(loss) or torch.isinf(loss):
@@ -154,8 +170,6 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
         test_metrics['srcc'].append(avg_srocc_test)
         test_metrics['plcc'].append(avg_plcc_test)
 
-
-
         # Validation metrics
         avg_srocc_val, avg_plcc_val = validate(args, model, val_dataloader, device)
         val_metrics['srcc'].append(avg_srocc_val)
@@ -171,6 +185,19 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
 
     print("Finished training")
     return train_metrics, val_metrics, test_metrics
+
+def evaluate_zero_shot(model, unseen_dataset, device):
+    unseen_dataloader = DataLoader(unseen_dataset, batch_size=32, shuffle=False)
+    metrics = {'srcc': [], 'plcc': []}
+    for batch in unseen_dataloader:
+        inputs_A = batch["img_A"].to(device)
+        mos = batch["mos"].to(device)
+        proj_A = model(inputs_A)
+        srcc, _ = stats.spearmanr(mos.cpu().numpy(), proj_A.cpu().numpy().flatten())
+        plcc, _ = stats.pearsonr(mos.cpu().numpy(), proj_A.cpu().numpy().flatten())
+        metrics['srcc'].append(srcc)
+        metrics['plcc'].append(plcc)
+    return metrics
 
 
 def optimize_ridge_alpha(embeddings, mos_scores):
@@ -190,7 +217,6 @@ def train_ridge_regressor(model: nn.Module, train_dataloader: DataLoader, device
             inputs_A = batch["img_A"].to(device)
             mos = batch["mos"]
 
-            # Reshape inputs_A if it is 5D
             if inputs_A.dim() == 5:
                 inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # Flatten crops
 
@@ -202,31 +228,30 @@ def train_ridge_regressor(model: nn.Module, train_dataloader: DataLoader, device
 
     embeddings = np.vstack(embeddings)
     mos_scores = np.hstack(mos_scores)
-    print(f"Embeddings shape: {np.array(embeddings).shape}")
-    print(f"MOS scores shape: {np.array(mos_scores).shape}")
-    print(f"MOS scores: {mos_scores[:10]}")
-
+    assert embeddings.shape[0] == mos_scores.shape[0], "Mismatch in embeddings and MOS shapes"
     return optimize_ridge_alpha(embeddings, mos_scores)
 
-
-def evaluate_ridge_regressor(regressor, model: nn.Module, val_dataloader: DataLoader, device: torch.device):
+def evaluate_ridge_regressor(regressor, model: nn.Module, dataloader: DataLoader, device: torch.device):
     model.eval()
     mos_scores, predictions = [], []
     with torch.no_grad():
-        for batch in val_dataloader:
+        for batch in dataloader:
             inputs_A = batch["img_A"].to(device)
             mos = batch["mos"]
+
             if inputs_A.dim() == 4:
-                inputs_A = inputs_A.unsqueeze(1)
-                inputs_A = inputs_A.expand(-1, 2, -1, -1, -1)
+                inputs_A = inputs_A.unsqueeze(1).expand(-1, 2, -1, -1, -1)
+
             proj_A, _ = model(inputs_A, inputs_A)
             prediction = regressor.predict(proj_A.cpu().numpy())
             repeat_factor = proj_A.shape[0] // mos.shape[0]
-            mos_repeated = np.repeat(mos.numpy(), repeat_factor)[:proj_A.shape[0]]
+            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)[:proj_A.shape[0]]
             predictions.append(prediction)
             mos_scores.append(mos_repeated)
+
     mos_scores = np.hstack(mos_scores)
     predictions = np.hstack(predictions)
+    assert len(mos_scores) == len(predictions), "Mismatch between MOS and Predictions length"
     return mos_scores, predictions
 
 def plot_results(mos_scores, predictions):
@@ -240,6 +265,16 @@ def plot_results(mos_scores, predictions):
     plt.legend()
     plt.grid()
     plt.show()
+
+def debug_embeddings(embeddings, title="Embeddings"):
+    plt.figure(figsize=(8, 6))
+    plt.hist(embeddings.flatten(), bins=50, alpha=0.7)
+    plt.title(f"{title} Distribution")
+    plt.xlabel("Embedding Value")
+    plt.ylabel("Frequency")
+    plt.grid()
+    plt.show()
+
 
 if __name__ == "__main__":
     config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
@@ -330,5 +365,9 @@ if __name__ == "__main__":
     print("Validation Metrics:", format_metrics(val_metrics))
     print("Test Metrics:", format_metrics(test_metrics))
 
-# Epoch 1 Validation Results: SRCC = 0.8905, PLCC = 0.8975
-# Epoch 2 Validation Results: SRCC = 0.8878, PLCC = 0.8949
+# train.py
+
+# Epoch 1 Validation Results: SRCC = 0.8631, PLCC = 0.8690
+# Epoch 1 Training Results: SRCC = 0.8662, PLCC = 0.8717
+# Epoch 1 Test Results: SRCC = 0.8639, PLCC = 0.8696
+
