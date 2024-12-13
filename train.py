@@ -93,6 +93,11 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
     checkpoint_path.mkdir(parents=True, exist_ok=True)
     best_srocc = 0
 
+    # Initialize metrics
+    train_metrics = {'srcc': [], 'plcc': []}
+    val_metrics = {'srcc': [], 'plcc': []}
+    test_metrics = {'srcc': [], 'plcc': []}
+
     for epoch in range(args.training.epochs):
         model.train()
         running_loss = 0.0
@@ -139,14 +144,33 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
 
         lr_scheduler.step()
 
+        # Training metrics 계산
+        avg_srocc_train, avg_plcc_train = validate(args, model, train_dataloader, device)
+        train_metrics['srcc'].append(avg_srocc_train)
+        train_metrics['plcc'].append(avg_plcc_train)
+
+        # Test metrics 계산
+        avg_srocc_test, avg_plcc_test = validate(args, model, test_dataloader, device)
+        test_metrics['srcc'].append(avg_srocc_test)
+        test_metrics['plcc'].append(avg_plcc_test)
+
+
+
+        # Validation metrics
         avg_srocc_val, avg_plcc_val = validate(args, model, val_dataloader, device)
+        val_metrics['srcc'].append(avg_srocc_val)
+        val_metrics['plcc'].append(avg_plcc_val)
+
         print(f"Epoch {epoch + 1} Validation Results: SRCC = {avg_srocc_val:.4f}, PLCC = {avg_plcc_val:.4f}")
+        print(f"Epoch {epoch + 1} Training Results: SRCC = {avg_srocc_train:.4f}, PLCC = {avg_plcc_train:.4f}")
+        print(f"Epoch {epoch + 1} Test Results: SRCC = {avg_srocc_test:.4f}, PLCC = {avg_plcc_test:.4f}")
 
         if avg_srocc_val > best_srocc:
             best_srocc = avg_srocc_val
             save_checkpoint(model, checkpoint_path, epoch, best_srocc)
 
     print("Finished training")
+    return train_metrics, val_metrics, test_metrics
 
 
 def optimize_ridge_alpha(embeddings, mos_scores):
@@ -165,16 +189,25 @@ def train_ridge_regressor(model: nn.Module, train_dataloader: DataLoader, device
         for batch in train_dataloader:
             inputs_A = batch["img_A"].to(device)
             mos = batch["mos"]
-            if inputs_A.dim() == 4:
-                inputs_A = inputs_A.unsqueeze(1)
+
+            # Reshape inputs_A if it is 5D
+            if inputs_A.dim() == 5:
+                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # Flatten crops
+
             proj_A, _ = model(inputs_A, inputs_A)
             repeat_factor = proj_A.shape[0] // mos.shape[0]
-            mos_repeated = np.repeat(mos.numpy(), repeat_factor)[:proj_A.shape[0]]
+            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)[:proj_A.shape[0]]
             embeddings.append(proj_A.cpu().numpy())
             mos_scores.append(mos_repeated)
+
     embeddings = np.vstack(embeddings)
     mos_scores = np.hstack(mos_scores)
+    print(f"Embeddings shape: {np.array(embeddings).shape}")
+    print(f"MOS scores shape: {np.array(mos_scores).shape}")
+    print(f"MOS scores: {mos_scores[:10]}")
+
     return optimize_ridge_alpha(embeddings, mos_scores)
+
 
 def evaluate_ridge_regressor(regressor, model: nn.Module, val_dataloader: DataLoader, device: torch.device):
     model.eval()
@@ -259,15 +292,15 @@ if __name__ == "__main__":
 
     # train 함수 호출
     train_metrics, val_metrics, test_metrics = train(
-        args,  # args를 전달
+        args, 
         model, 
         train_dataloader, 
         val_dataloader, 
-        test_dataloader,  # test_dataloader 추가
+        test_dataloader, 
         optimizer, 
         lr_scheduler, 
         scaler, 
-        device  # device 인자 추가
+        device
     )
 
     # Ridge Regressor 학습 (Train 데이터 사용)
@@ -296,3 +329,6 @@ if __name__ == "__main__":
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
     print("Test Metrics:", format_metrics(test_metrics))
+
+# Epoch 1 Validation Results: SRCC = 0.8905, PLCC = 0.8975
+# Epoch 2 Validation Results: SRCC = 0.8878, PLCC = 0.8949

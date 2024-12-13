@@ -4,8 +4,6 @@ checkpoints/
 dataset/
 experiments/
 __pycache__/
-변경/
-ddddd.py
 dither_test.py
 hubconf.py
 install_requirements.sh
