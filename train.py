@@ -67,6 +67,17 @@ def debug_ridge_regressor(embeddings, mos_scores):
     plt.grid()
     plt.show()
 
+
+def plot_embeddings(embeddings, title="Embedding Distribution"):
+    plt.figure(figsize=(8, 6))
+    embeddings = embeddings.detach().cpu().numpy()
+    plt.hist(embeddings.flatten(), bins=50, alpha=0.7, color="blue")
+    plt.title(title)
+    plt.xlabel("Embedding Value")
+    plt.ylabel("Frequency")
+    plt.grid()
+    plt.show()
+
 def validate(args, model, dataloader, device):
     model.eval()
     srocc_values, plcc_values = [], []
@@ -76,18 +87,10 @@ def validate(args, model, dataloader, device):
             inputs_A = batch["img_A"].to(device)
             inputs_B = batch["img_B"].to(device)
 
-            # Flatten crops if needed
-            if inputs_A.dim() == 5:
-                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
-                inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
-
             proj_A, proj_B = model(inputs_A, inputs_B)
-
-            # Normalize projections for SRCC/PLCC calculation
             proj_A = F.normalize(proj_A, dim=1).detach().cpu().numpy()
             proj_B = F.normalize(proj_B, dim=1).detach().cpu().numpy()
 
-            # Calculate SRCC and PLCC
             srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
             plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
 
@@ -99,16 +102,13 @@ def validate(args, model, dataloader, device):
 
     return avg_srocc, avg_plcc
 
-
-def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, scaler, device):
+def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler, scaler, device):
     checkpoint_path = Path(str(args.checkpoint_base_path))
     checkpoint_path.mkdir(parents=True, exist_ok=True)
     best_srocc = 0
 
-    # Initialize metrics
-    train_metrics = {'srcc': [], 'plcc': []}
+    train_metrics = {'loss': [], 'srcc': [], 'plcc': []}
     val_metrics = {'srcc': [], 'plcc': []}
-    test_metrics = {'srcc': [], 'plcc': []}
 
     for epoch in range(args.training.epochs):
         model.train()
@@ -119,19 +119,30 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
             inputs_A = batch["img_A"].to(device)
             inputs_B = batch["img_B"].to(device)
 
-            # Flatten crops if needed
-            if inputs_A.dim() == 5:
-                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
+            # 입력 크기 확인 및 변환
+            if inputs_A.dim() == 5:  # 5D 텐서인 경우 (batch_size, num_crops, channels, height, width)
+                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # (batch_size * num_crops, channels, height, width)
+            if inputs_B.dim() == 5:
                 inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
 
-            # Generate hard negatives
             hard_negatives = generate_hard_negatives(inputs_B, scale_factor=0.5)
-            hard_negatives = hard_negatives.view(-1, *hard_negatives.shape[2:])
 
-            # Process hard negatives through backbone and projector
+            # 디버깅: hard_negatives 차원 확인
+            print(f"Batch {i}: hard_negatives shape before adjustment: {hard_negatives.shape}")
+
+            # 5D 텐서를 4D 텐서로 변환
+            if hard_negatives.dim() == 5:
+                hard_negatives = hard_negatives.squeeze(1)  # (batch_size, channels, height, width)
+
+            # 채널 수가 3이 아닌 경우 3 채널로 확장
+            if hard_negatives.size(1) != 3:
+                print(f"Warning: hard_negatives has {hard_negatives.size(1)} channels. Adjusting to 3 channels.")
+                hard_negatives = hard_negatives[:, :3, :, :]  # 첫 3개 채널만 사용
+
+            # Backbone을 통해 hard negatives 처리
             backbone_output = model.backbone(hard_negatives)
             gap_output = backbone_output.mean([2, 3])  # Global Average Pooling
-            proj_negatives = model.projector(gap_output)  # [batch_size * num_crops, embedding_dim]
+            proj_negatives = model.projector(gap_output)  # Project to the same dimension as proj_A and proj_B
             proj_negatives = F.normalize(proj_negatives, dim=1)
 
             optimizer.zero_grad()
@@ -141,14 +152,14 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
                 proj_A = F.normalize(proj_A, dim=1)
                 proj_B = F.normalize(proj_B, dim=1)
 
-                # Calculate SE weights from features_A
+                # SE 가중치 확인
                 features_A = model.backbone(inputs_A)
-                se_weights = features_A.mean(dim=[2, 3])  # Calculate SE weights
+                se_weights = features_A.mean(dim=[2, 3])
+                se_weights = torch.clamp(se_weights, 0, 1)  # 0~1로 제한
 
-                # Compute loss with SE weights
+                # Loss 계산
                 loss = model.compute_loss(proj_A, proj_B, proj_negatives, se_weights)
 
-            # Debugging: Check for NaN/Inf values
             if torch.isnan(loss) or torch.isinf(loss):
                 print(f"Loss is NaN or Inf at batch {i}. Skipping this batch.")
                 continue
@@ -160,33 +171,27 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
             running_loss += loss.item()
             progress_bar.set_postfix(loss=running_loss / (i + 1))
 
-        lr_scheduler.step()
+            # 디버깅: 크기 확인
+            if i % 10 == 0:
+                print(f"Batch {i}: proj_A shape: {proj_A.shape}, proj_B shape: {proj_B.shape}")
+                print(f"Batch {i}: proj_negatives shape: {proj_negatives.shape}")
 
-        # Training metrics 계산
-        avg_srocc_train, avg_plcc_train = validate(args, model, train_dataloader, device)
-        train_metrics['srcc'].append(avg_srocc_train)
-        train_metrics['plcc'].append(avg_plcc_train)
+        train_metrics['loss'].append(running_loss / len(train_dataloader))
 
-        # Test metrics 계산
-        avg_srocc_test, avg_plcc_test = validate(args, model, test_dataloader, device)
-        test_metrics['srcc'].append(avg_srocc_test)
-        test_metrics['plcc'].append(avg_plcc_test)
-
-        # Validation metrics
+        # Validation
         avg_srocc_val, avg_plcc_val = validate(args, model, val_dataloader, device)
         val_metrics['srcc'].append(avg_srocc_val)
         val_metrics['plcc'].append(avg_plcc_val)
 
         print(f"Epoch {epoch + 1} Validation Results: SRCC = {avg_srocc_val:.4f}, PLCC = {avg_plcc_val:.4f}")
-        print(f"Epoch {epoch + 1} Training Results: SRCC = {avg_srocc_train:.4f}, PLCC = {avg_plcc_train:.4f}")
-        print(f"Epoch {epoch + 1} Test Results: SRCC = {avg_srocc_test:.4f}, PLCC = {avg_plcc_test:.4f}")
 
         if avg_srocc_val > best_srocc:
             best_srocc = avg_srocc_val
             save_checkpoint(model, checkpoint_path, epoch, best_srocc)
 
     print("Finished training")
-    return train_metrics, val_metrics, test_metrics
+    return train_metrics, val_metrics
+
 
 def evaluate_zero_shot(model, unseen_dataset, device):
     unseen_dataloader = DataLoader(unseen_dataset, batch_size=32, shuffle=False)
@@ -282,7 +287,6 @@ if __name__ == "__main__":
     config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
     args = load_config(config_path)
 
-
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
     dataset_path = Path(args.data_base_path) / "kadid10k.csv"
     dataset = KADID10KDataset(dataset_path)
@@ -328,12 +332,11 @@ if __name__ == "__main__":
     scaler = torch.amp.GradScaler()
 
     # train 함수 호출
-    train_metrics, val_metrics, test_metrics = train(
+    train_metrics, val_metrics = train(
         args, 
         model, 
         train_dataloader, 
         val_dataloader, 
-        test_dataloader, 
         optimizer, 
         lr_scheduler, 
         scaler, 
@@ -365,7 +368,7 @@ if __name__ == "__main__":
 
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
-    print("Test Metrics:", format_metrics(test_metrics))
+
 
 
  # train.py
@@ -377,6 +380,8 @@ if __name__ == "__main__":
 # Epoch 3 Validation Results: SRCC = 0.8393, PLCC = 0.8494
 # Epoch 3 Training Results: SRCC = 0.8369, PLCC = 0.8471
 # Epoch 3 Test Results: SRCC = 0.8372, PLCC = 0.8477
+
+
 
 # TID2013
 """ 
