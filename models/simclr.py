@@ -107,22 +107,13 @@ class SimCLR(nn.Module):
         return proj_A
     
     def compute_loss(self, proj_A, proj_B, proj_negatives, se_weights):
-        # SE weights 크기 조정
-        se_weights = se_weights.mean(dim=1, keepdim=False)  # [batch_size]
-        se_weights = se_weights.unsqueeze(1)  # [batch_size, 1]
-
-        # Positive similarity
-        positive_similarity = torch.exp((torch.sum(proj_A * proj_B, dim=1) * se_weights.squeeze()) / self.temperature)
-
-        # Negative similarity
-        negative_similarity = torch.exp((torch.matmul(proj_A, proj_negatives.T)) / self.temperature)
-
-        # Normalization term
+        se_weights = se_weights / se_weights.sum(dim=1, keepdim=True)  # 정규화
+        positive_similarity = torch.exp(torch.sum(proj_A * proj_B, dim=1) / self.temperature)
+        negative_similarity = torch.exp(torch.matmul(proj_A, proj_negatives.T) / self.temperature)
         denom = positive_similarity + torch.sum(negative_similarity, dim=1)
-
-        # NT-Xent loss
         loss = -torch.mean(torch.log(positive_similarity / denom))
         return loss
+
 
 
 

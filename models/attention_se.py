@@ -44,15 +44,12 @@ class DistortionAttention(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, se_weights=None):
-        """
-        x: Input feature map
-        se_weights: SE module weights (optional)
-        """
         attention_map = self.sigmoid(self.conv(x))
         if se_weights is not None:
-            # Combine SE weights with attention map
-            return x * attention_map * se_weights.unsqueeze(2).unsqueeze(3)
+            combined_weights = attention_map * se_weights.unsqueeze(2).unsqueeze(3)
+            return x * combined_weights
         return x * attention_map
+
 
 class HardNegativeCrossAttention(nn.Module):
     def __init__(self, in_channels):

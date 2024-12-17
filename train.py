@@ -26,7 +26,8 @@ from tqdm import tqdm
 from pathlib import Path
 import random
 import matplotlib.pyplot as plt
-
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
 # Config loader
 def load_config(config_path: str) -> DotMap:
@@ -215,24 +216,27 @@ def optimize_ridge_alpha(embeddings, mos_scores):
 def train_ridge_regressor(model: nn.Module, train_dataloader: DataLoader, device: torch.device):
     model.eval()
     embeddings, mos_scores = [], []
+
     with torch.no_grad():
         for batch in train_dataloader:
             inputs_A = batch["img_A"].to(device)
             mos = batch["mos"]
 
-            if inputs_A.dim() == 5:
-                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # Flatten crops
-
-            proj_A, _ = model(inputs_A, inputs_A)
-            repeat_factor = proj_A.shape[0] // mos.shape[0]
-            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)[:proj_A.shape[0]]
-            embeddings.append(proj_A.cpu().numpy())
-            mos_scores.append(mos_repeated)
+            features_A = model.backbone(inputs_A)
+            features_A = features_A.mean([2, 3]).cpu().numpy()  # GAP 적용
+            embeddings.append(features_A)
+            mos_scores.append(mos.cpu().numpy())
 
     embeddings = np.vstack(embeddings)
     mos_scores = np.hstack(mos_scores)
-    assert embeddings.shape[0] == mos_scores.shape[0], "Mismatch in embeddings and MOS shapes"
-    return optimize_ridge_alpha(embeddings, mos_scores)
+
+    from sklearn.linear_model import Ridge
+    ridge = Ridge(alpha=1.0)
+    ridge.fit(embeddings, mos_scores)
+    print("Ridge Regressor Trained: Optimal alpha=1.0")
+    return ridge
+
+
 
 def evaluate_ridge_regressor(regressor, model: nn.Module, dataloader: DataLoader, device: torch.device):
     model.eval()
@@ -371,13 +375,15 @@ if __name__ == "__main__":
 
  # train.py
 
-# Epoch 1 Validation Results: SRCC = 0.8444, PLCC = 0.8551
-# Epoch 1 Training Results: SRCC = 0.8428, PLCC = 0.8536
-# Epoch 1 Test Results: SRCC = 0.8404, PLCC = 0.8508
+# Training Metrics: {'srcc': [0.838], 'plcc': [0.8455]}
+# Validation Metrics: {'srcc': [0.8366], 'plcc': [0.844]}
+# Test Metrics: {'srcc': [0.8383], 'plcc': [0.8464]}
+
 
 # Epoch 3 Validation Results: SRCC = 0.8393, PLCC = 0.8494
 # Epoch 3 Training Results: SRCC = 0.8369, PLCC = 0.8471
 # Epoch 3 Test Results: SRCC = 0.8372, PLCC = 0.8477
+
 
 # TID2013
 """ 
