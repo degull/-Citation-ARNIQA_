@@ -86,8 +86,10 @@ class SimCLR(nn.Module):
         self.attention = DistortionAttention(2048)
 
     def forward(self, inputs_A, inputs_B=None):
+        # 입력 차원이 5D이면 4D로 변환
         if inputs_A.dim() == 5:
             inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
+
         features_A = self.backbone(inputs_A)
         se_weights = features_A.mean(dim=[2, 3])  # SE 가중치 계산
         features_A = self.attention(features_A, se_weights)  # Attention 적용
@@ -105,6 +107,7 @@ class SimCLR(nn.Module):
             return proj_A, proj_B
 
         return proj_A
+
     
     def compute_loss(self, proj_A, proj_B, proj_negatives, se_weights):
         se_weights = se_weights / se_weights.sum(dim=1, keepdim=True)  # 정규화

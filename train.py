@@ -222,13 +222,27 @@ def train_ridge_regressor(model: nn.Module, train_dataloader: DataLoader, device
             inputs_A = batch["img_A"].to(device)
             mos = batch["mos"]
 
+            # 입력이 5D 텐서일 경우 4D로 변환
+            if inputs_A.dim() == 5:
+                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # [batch_size * num_crops, channels, height, width]
+
             features_A = model.backbone(inputs_A)
             features_A = features_A.mean([2, 3]).cpu().numpy()  # GAP 적용
-            embeddings.append(features_A)
-            mos_scores.append(mos.cpu().numpy())
 
+            # `mos` 값 반복 (inputs_A 크기에 맞춰 조정)
+            repeat_factor = features_A.shape[0] // mos.shape[0]  # inputs_A와 mos의 크기 비율 계산
+            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)[:features_A.shape[0]]
+
+            embeddings.append(features_A)
+            mos_scores.append(mos_repeated)
+
+    # 리스트를 numpy 배열로 변환
     embeddings = np.vstack(embeddings)
     mos_scores = np.hstack(mos_scores)
+
+    # 크기 검증
+    assert embeddings.shape[0] == mos_scores.shape[0], \
+        f"Mismatch in embeddings ({embeddings.shape[0]}) and MOS scores ({mos_scores.shape[0]})"
 
     from sklearn.linear_model import Ridge
     ridge = Ridge(alpha=1.0)
@@ -238,28 +252,39 @@ def train_ridge_regressor(model: nn.Module, train_dataloader: DataLoader, device
 
 
 
+
 def evaluate_ridge_regressor(regressor, model: nn.Module, dataloader: DataLoader, device: torch.device):
     model.eval()
     mos_scores, predictions = [], []
+
     with torch.no_grad():
         for batch in dataloader:
             inputs_A = batch["img_A"].to(device)
             mos = batch["mos"]
 
-            if inputs_A.dim() == 4:
-                inputs_A = inputs_A.unsqueeze(1).expand(-1, 2, -1, -1, -1)
+            if inputs_A.dim() == 5:
+                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # Flatten crops if needed
 
-            proj_A, _ = model(inputs_A, inputs_A)
-            prediction = regressor.predict(proj_A.cpu().numpy())
-            repeat_factor = proj_A.shape[0] // mos.shape[0]
-            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)[:proj_A.shape[0]]
-            predictions.append(prediction)
-            mos_scores.append(mos_repeated)
+            # Use backbone features for Ridge prediction
+            features_A = model.backbone(inputs_A)
+            features_A = features_A.mean([2, 3]).cpu().numpy()  # GAP 적용
 
-    mos_scores = np.hstack(mos_scores)
-    predictions = np.hstack(predictions)
-    assert len(mos_scores) == len(predictions), "Mismatch between MOS and Predictions length"
+            prediction = regressor.predict(features_A)  # Use backbone features
+            repeat_factor = features_A.shape[0] // mos.shape[0]
+            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)[:features_A.shape[0]]
+
+            predictions.extend(prediction)
+            mos_scores.extend(mos_repeated)
+
+    mos_scores = np.array(mos_scores)
+    predictions = np.array(predictions)
+    assert mos_scores.shape == predictions.shape, \
+        f"Mismatch between MOS ({mos_scores.shape}) and Predictions ({predictions.shape})"
+
     return mos_scores, predictions
+
+
+
 
 def plot_results(mos_scores, predictions):
     assert mos_scores.shape == predictions.shape, "mos_scores and predictions must have the same shape"
@@ -374,15 +399,6 @@ if __name__ == "__main__":
 
 
  # train.py
-
-# Training Metrics: {'srcc': [0.838], 'plcc': [0.8455]}
-# Validation Metrics: {'srcc': [0.8366], 'plcc': [0.844]}
-# Test Metrics: {'srcc': [0.8383], 'plcc': [0.8464]}
-
-
-# Epoch 3 Validation Results: SRCC = 0.8393, PLCC = 0.8494
-# Epoch 3 Training Results: SRCC = 0.8369, PLCC = 0.8471
-# Epoch 3 Test Results: SRCC = 0.8372, PLCC = 0.8477
 
 
 # TID2013
