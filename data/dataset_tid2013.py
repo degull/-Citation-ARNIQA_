@@ -198,6 +198,17 @@ distortion_types_mapping = {
     25: "contrast_change"
 }
 
+def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, applied_distortions_B):
+    print(f"[Debug] Verifying Positive Pairs:")
+    print(f" - Distortion A: {distortions_A}, Distortion B: {distortions_B}")
+    print(f" - Applied Level A: {applied_distortions_A}, Applied Level B: {applied_distortions_B}")
+
+    if distortions_A == distortions_B and applied_distortions_A == applied_distortions_B:
+        print(f"[Positive Pair Verification] Success: Distortions match.")
+    else:
+        print(f"[Positive Pair Verification] Error: Distortions do not match.")
+
+
 # 강도 레벨 정의
 def get_distortion_levels():
     return {
@@ -245,63 +256,83 @@ class TID2013Dataset(Dataset):
         ])(image)
 
     def apply_distortion(self, image, distortion, level):
-        if distortion == "gaussian_blur":
-            image = image.filter(ImageFilter.GaussianBlur(radius=level))
-        elif distortion == "lens_blur":
-            image = image.filter(ImageFilter.GaussianBlur(radius=level))
-        elif distortion == "motion_blur":
-            image = image.filter(ImageFilter.BoxBlur(level))
-        elif distortion == "color_diffusion":
-            diffused = np.array(image).astype(np.float32)
-            diffused += np.random.uniform(-level, level, diffused.shape)
-            image = Image.fromarray(np.clip(diffused, 0, 255).astype(np.uint8))
-        elif distortion == "color_shift":
-            shifted = np.array(image).astype(np.float32)
-            shift_amount = np.random.randint(-level, level + 1, shifted.shape)
-            shifted += shift_amount
-            image = Image.fromarray(np.clip(shifted, 0, 255).astype(np.uint8))
-        elif distortion == "jpeg2000":
-            image = image.resize((image.width // 2, image.height // 2))
-        elif distortion == "white_noise":
-            noise = np.random.normal(0, level, (image.height, image.width, 3))
-            noisy_image = np.array(image).astype(np.float32) + noise
-            image = Image.fromarray(np.clip(noisy_image, 0, 255).astype(np.uint8))
-        elif distortion == "impulse_noise":
-            image = np.array(image)
-            prob = 0.1
-            for i in range(image.shape[0]):
-                for j in range(image.shape[1]):
-                    if random.random() < prob:
-                        image[i][j] = np.random.choice([0, 255], size=3)
-            image = Image.fromarray(image)
-
+        try:
+            if distortion == "gaussian_blur":
+                image = image.filter(ImageFilter.GaussianBlur(radius=level))
+            elif distortion == "lens_blur":
+                image = image.filter(ImageFilter.GaussianBlur(radius=level))
+            elif distortion == "motion_blur":
+                image = image.filter(ImageFilter.BoxBlur(level))
+            elif distortion == "color_diffusion":
+                diffused = np.array(image).astype(np.float32)
+                diffused += np.random.uniform(-level, level, diffused.shape)
+                image = Image.fromarray(np.clip(diffused, 0, 255).astype(np.uint8))
+            elif distortion == "color_shift":
+                shifted = np.array(image).astype(np.float32)
+                shift_amount = np.random.randint(-level, level + 1, shifted.shape)
+                shifted += shift_amount
+                image = Image.fromarray(np.clip(shifted, 0, 255).astype(np.uint8))
+            elif distortion == "jpeg2000":
+                image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
+            elif distortion == "white_noise":
+                noise = np.random.normal(0, level, (image.height, image.width, 3))
+                noisy_image = np.array(image).astype(np.float32) + noise
+                image = Image.fromarray(np.clip(noisy_image, 0, 255).astype(np.uint8))
+            elif distortion == "impulse_noise":
+                image = np.array(image)
+                prob = 0.1
+                for i in range(image.shape[0]):
+                    for j in range(image.shape[1]):
+                        if random.random() < prob:
+                            image[i][j] = np.random.choice([0, 255], size=3)
+                image = Image.fromarray(image)
+        except Exception as e:
+            print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
         return image
 
-    def apply_random_distortions(self, image, num_distortions=4):
-        distortions = random.sample(list(self.distortion_levels.keys()), num_distortions)
 
-        for distortion in distortions:
-            level = random.choice(self.distortion_levels[distortion])
+    def apply_random_distortions(self, image, distortions=None, levels=None):
+        if distortions is None:
+            distortions = random.sample(list(self.distortion_levels.keys()), 1)
+        if levels is None:
+            levels = [random.choice(self.distortion_levels[distortion]) for distortion in distortions]
 
-            if level <= 0:
-                print(f"Skipping distortion: {distortion} with invalid level: {level}")
-                continue
-
-            print(f"Applying distortion: {distortion} with level: {level}")
+        for distortion, level in zip(distortions, levels):
+            print(f"[Debug] Applying distortion: {distortion} with level: {level}")
             try:
                 image = self.apply_distortion(image, distortion, level)
             except Exception as e:
-                print(f"Error applying distortion {distortion} with level {level}: {e}")
-                raise
-
+                print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
+                continue
         return image
 
-    def __getitem__(self, index: int):
-        img_A_orig = Image.open(self.image_paths[index]).convert("RGB")
-        img_B_orig = Image.open(self.reference_paths[index]).convert("RGB")
+    
 
-        img_A_distorted = self.apply_random_distortions(img_A_orig)
-        img_B_distorted = self.apply_random_distortions(img_B_orig)
+    def __getitem__(self, index: int):
+        try:
+            img_A_orig = Image.open(self.image_paths[index]).convert("RGB")
+            img_B_orig = Image.open(self.reference_paths[index]).convert("RGB")
+        except Exception as e:
+            print(f"[Error] Loading image: {self.image_paths[index]} or {self.reference_paths[index]}: {e}")
+            return None
+
+        # 동일한 왜곡 적용
+        distortions = random.sample(list(self.distortion_levels.keys()), 1)
+        levels = [random.choice(self.distortion_levels[distortions[0]])]
+
+        # 디버깅 로그 추가
+        print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
+
+        img_A_distorted = self.apply_random_distortions(img_A_orig, distortions, levels)
+        img_B_distorted = self.apply_random_distortions(img_B_orig, distortions, levels)
+
+        # Positive Pair 검증
+        verify_positive_pairs(
+            distortions_A=distortions[0],
+            distortions_B=distortions[0],
+            applied_distortions_A=levels[0],
+            applied_distortions_B=levels[0],
+        )
 
         img_A_orig = self.transform(img_A_orig)
         img_B_orig = self.transform(img_B_orig)
