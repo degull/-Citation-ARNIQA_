@@ -76,14 +76,14 @@ test:
 
 # Model
 model:
-  temperature: 0.1
+  temperature: 0.05
   encoder:
     embedding_dim: 128
     pretrained: true
     use_norm: true
   se_block:
     use_se: true
-    reduction: 16
+    reduction: 8
     activation: relu
 
 # Logging
