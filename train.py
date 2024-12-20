@@ -1109,7 +1109,7 @@ if __name__ == "__main__":
 # train.py
 
 # Train(KADID) & Test(TID2013)
-""" import torch
+import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -1171,9 +1171,14 @@ def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler
     checkpoint_path.mkdir(parents=True, exist_ok=True)
     best_srocc = 0
 
+    train_metrics = {'loss': [], 'srcc': [], 'plcc': []}
+    val_metrics = {'srcc': [], 'plcc': []}
+
     for epoch in range(args.training.epochs):
         model.train()
         running_loss = 0.0
+        srocc_values, plcc_values = [], []
+
         progress_bar = tqdm(train_dataloader, desc=f"Epoch [{epoch + 1}/{args.training.epochs}]")
 
         for i, batch in enumerate(progress_bar):
@@ -1215,14 +1220,28 @@ def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler
             running_loss += loss.item()
             progress_bar.set_postfix(loss=running_loss / (i + 1))
 
+            # Calculate SRCC and PLCC for the batch
+            srocc, _ = stats.spearmanr(proj_A.detach().cpu().numpy().flatten(), proj_B.detach().cpu().numpy().flatten())
+            plcc, _ = stats.pearsonr(proj_A.detach().cpu().numpy().flatten(), proj_B.detach().cpu().numpy().flatten())
+            srocc_values.append(srocc)
+            plcc_values.append(plcc)
+
+        train_metrics['loss'].append(running_loss / len(train_dataloader))
+        train_metrics['srcc'].append(np.mean(srocc_values))
+        train_metrics['plcc'].append(np.mean(plcc_values))
+
         lr_scheduler.step()
 
         avg_srocc_val, avg_plcc_val = validate(args, model, val_dataloader, device)
+        val_metrics['srcc'].append(avg_srocc_val)
+        val_metrics['plcc'].append(avg_plcc_val)
+
         if avg_srocc_val > best_srocc:
             best_srocc = avg_srocc_val
             save_checkpoint(model, checkpoint_path, epoch, best_srocc)
 
     print("Training complete. Best SRCC:", best_srocc)
+    return train_metrics, val_metrics
 
 
 def test(args, model, test_dataloader, device):
@@ -1248,13 +1267,15 @@ def test(args, model, test_dataloader, device):
     avg_plcc_test = np.mean(plcc_values)
     return {'srcc': avg_srocc_test, 'plcc': avg_plcc_test}
 
+
+
 if __name__ == "__main__":
     config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
     args = load_config(config_path)
 
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
-    # KADID10K Dataset
+    # KADID10K Dataset (Training and Validation)
     kadid_dataset_path = Path("E:/ARNIQA - SE - mix/ARNIQA/dataset/KADID10K/kadid10k.csv")
     kadid_dataset = KADID10KDataset(kadid_dataset_path)
 
@@ -1266,7 +1287,7 @@ if __name__ == "__main__":
     train_dataloader = DataLoader(train_dataset, batch_size=args.training.batch_size, shuffle=True, num_workers=4)
     val_dataloader = DataLoader(val_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
 
-    # TID2013 Dataset
+    # TID2013 Dataset (Test)
     tid_dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013/mos.csv"
     tid_dataset = TID2013Dataset(Path(tid_dataset_path))
     test_dataloader = DataLoader(tid_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
@@ -1285,19 +1306,30 @@ if __name__ == "__main__":
     scaler = torch.amp.GradScaler()
 
     # Training on KADID10K
-    train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler, scaler, device)
+    train_metrics, val_metrics = train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler, scaler, device)
 
     # Testing on TID2013
     test_results = test(args, model, test_dataloader, device)
+    print("Train(KADID10K) & Test(TID2013)")
     print(f"\nTest Results on TID2013 Dataset: SRCC = {test_results['srcc']:.4f}, PLCC = {test_results['plcc']:.4f}")
- """
-# Test Results on TID2013 Dataset: SRCC = 0.9135, PLCC = 0.9175
 
+    def format_metrics(metrics):
+        return {key: [round(value, 4) for value in values] for key, values in metrics.items()}
+
+    print("\nTraining Metrics:", format_metrics(train_metrics))
+    print("Validation Metrics:", format_metrics(val_metrics))
+
+
+# Train(KADID10K) & Test(TID2013)
+# Test Results on TID2013 Dataset: SRCC = 0.9280, PLCC = 0.9319
+# 
+# Training Metrics: {'srcc': [0.9293, 0.9302, 0.93, 0.9286, 0.9305, 0.9293, 0.9297, 0.9298, 0.9292, 0.9304], 'plcc': [0.9327, 0.9336, 0.9332, 0.9319, 0.9337, 0.9324, 0.9331, 0.9331, 0.9325, 0.9336]}
+# Validation Metrics: {'srcc': [0.9237, 0.925, 0.9212, 0.9213, 0.9212, 0.9245, 0.9202, 0.9158, 0.9196, 0.9199], 'plcc': [0.9271, 0.9282, 0.9241, 0.9253, 0.9245, 0.9277, 0.9226, 0.9196, 0.923, 0.9234]}
 
 
 
 # Train(TID2013) & Test(KADID)
- 
+""" 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -1507,3 +1539,10 @@ if __name__ == "__main__":
 
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
+ """
+
+# Train(TID2013) & Test(KADID)
+# Test Results on KADID10K Dataset: SRCC = 0.8999, PLCC = 0.9084
+# 
+# Training Metrics: {'srcc': [0.909, 0.9123, 0.9099, 0.9123, 0.9092, 0.9103, 0.9089, 0.9112, 0.9087, 0.9087], 'plcc': [0.9159, 0.9187, 0.9167, 0.9187, 0.9162, 0.9168, 0.9158, 0.9178, 0.9156, 0.9155]}
+# Validation Metrics: {'srcc': [0.913, 0.9044, 0.8976, 0.9157, 0.9067, 0.9056, 0.905, 0.9113, 0.9106, 0.9028], 'plcc': [0.9183, 0.9107, 0.9053, 0.9208, 0.9129, 0.9121, 0.9112, 0.9177, 0.9172, 0.9095]}
