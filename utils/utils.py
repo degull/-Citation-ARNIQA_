@@ -9,6 +9,15 @@ from pathlib import Path
 # 프로젝트 루트 경로 설정
 PROJECT_ROOT = Path(__file__).absolute().parents[1].absolute()
 
+import yaml
+from dotmap import DotMap
+
+def load_config(config_path: str) -> DotMap:
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+    return DotMap(config)
+
+
 def parse_config(config_file_path: str) -> DotMap:
     """YAML 설정 파일을 파싱합니다."""
     # 파일을 UTF-8 인코딩으로 엽니다.

@@ -262,6 +262,7 @@ def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, a
 
 
 class KADID10KDataset(Dataset):
+    # 단일
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         super().__init__()
         self.root = Path(root)
@@ -306,39 +307,147 @@ class KADID10KDataset(Dataset):
 
     def apply_distortion(self, image, distortion, level):
         try:
+            image = image.convert("RGB")  # Ensure the image is in RGB format
+
             if distortion == "gaussian_blur":
                 image = image.filter(ImageFilter.GaussianBlur(radius=level))
+
             elif distortion == "lens_blur":
                 image = image.filter(ImageFilter.GaussianBlur(radius=level))
+
             elif distortion == "motion_blur":
                 image = image.filter(ImageFilter.BoxBlur(level))
+
             elif distortion == "color_diffusion":
                 diffused = np.array(image).astype(np.float32)
-                diffused += np.random.uniform(-level, level, diffused.shape)
-                image = Image.fromarray(np.clip(diffused, 0, 255).astype(np.uint8))
+                
+                # 색상 확산을 위한 무작위 값 생성
+                diffusion = np.random.uniform(-level * 255, level * 255, size=diffused.shape).astype(np.float32)
+                
+                # 색상 확산 적용
+                diffused += diffusion
+                
+                # 값 클리핑 (0~255 범위로 제한)
+                diffused = np.clip(diffused, 0, 255).astype(np.uint8)
+
+                # 다시 PIL 이미지로 변환
+                image = Image.fromarray(diffused)
+
             elif distortion == "color_shift":
                 shifted = np.array(image).astype(np.float32)
-                shift_amount = np.random.randint(-level, level + 1, shifted.shape)
+                shift_amount = np.random.uniform(-level * 255, level * 255, shifted.shape[-1])
                 shifted += shift_amount
                 image = Image.fromarray(np.clip(shifted, 0, 255).astype(np.uint8))
+
             elif distortion == "jpeg2000":
                 image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
+
+            elif distortion == "jpeg":
+                # JPEG 품질 수준은 1 ~ 100의 정수로 설정
+                quality = max(1, min(100, int(100 - (level * 100))))
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG", quality=quality)
+                buffer.seek(0)
+                return Image.open(buffer)
+
             elif distortion == "white_noise":
-                noise = np.random.normal(0, level, (image.height, image.width, 3))
-                noisy_image = np.array(image).astype(np.float32) + noise
-                image = Image.fromarray(np.clip(noisy_image, 0, 255).astype(np.uint8))
+                # 이미지를 numpy 배열로 변환 (float32로)
+                image_array = np.array(image, dtype=np.float32)
+                
+                # 노이즈 생성 (가우시안 노이즈)
+                noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
+                
+                # 원본 이미지에 노이즈 추가
+                noisy_image = image_array + noise
+                
+                # 값 클리핑 (0~255 범위로 제한)
+                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+                
+                # 디버깅: noise와 noisy_image 값 확인
+                print("White Noise Debug:")
+                print("Noise min/max:", noise.min(), noise.max())
+                print("Noisy Image min/max:", noisy_image.min(), noisy_image.max())
+                
+                # 다시 PIL 이미지로 변환
+                image = Image.fromarray(noisy_image)
+
             elif distortion == "impulse_noise":
-                image = np.array(image)
-                prob = 0.1
-                for i in range(image.shape[0]):
-                    for j in range(image.shape[1]):
-                        if random.random() < prob:
-                            image[i][j] = np.random.choice([0, 255], size=3)
-                image = Image.fromarray(image)
+                image_array = np.array(image).astype(np.float32)  # NumPy 배열로 변환
+                prob = level
+                mask = np.random.choice([0, 1], size=image_array.shape[:2], p=[1 - prob, prob])
+                random_noise = np.random.choice([0, 255], size=(image_array.shape[0], image_array.shape[1], 1))
+                image_array[mask == 1] = random_noise[mask == 1]
+                image_array = np.clip(image_array, 0, 255).astype(np.uint8)
+                return Image.fromarray(image_array)
+
+            elif distortion == "multiplicative_noise":
+                image_array = np.array(image).astype(np.float32)  # NumPy 배열로 변환
+                noise = np.random.normal(1, level, image_array.shape)  # 1을 기준으로 곱셈 노이즈 생성
+                noisy_image = image_array * noise
+                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)  # 0~255로 클리핑
+                return Image.fromarray(noisy_image)
+
+            elif distortion == "denoise":
+                image = image.filter(ImageFilter.MedianFilter(size=int(level)))
+
+            elif distortion == "brighten":
+                enhancer = ImageEnhance.Brightness(image)
+                image = enhancer.enhance(1 + level)
+
+            elif distortion == "darken":
+                enhancer = ImageEnhance.Brightness(image)
+                image = enhancer.enhance(1 - level)
+
+            elif distortion == "mean_shift":
+                shifted_image = np.array(image).astype(np.float32) + level * 255
+                image = Image.fromarray(np.clip(shifted_image, 0, 255).astype(np.uint8))
+
+            elif distortion == "jitter":
+                jitter = np.random.randint(-level * 255, level * 255, (image.height, image.width, 3))
+                img_array = np.array(image).astype(np.float32) + jitter
+                image = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
+
+            elif distortion == "non_eccentricity_patch":
+                width, height = image.size
+                crop_level = int(level * min(width, height))
+                image = image.crop((crop_level, crop_level, width - crop_level, height - crop_level))
+                image = image.resize((width, height))
+
+            elif distortion == "pixelate":
+                width, height = image.size
+                image = image.resize((width // level, height // level)).resize((width, height), Image.NEAREST)
+
+            elif distortion == "quantization":
+                quantized = (np.array(image) // int(256 / level)) * int(256 / level)
+                image = Image.fromarray(np.clip(quantized, 0, 255).astype(np.uint8))
+
+            elif distortion == "color_block":
+                block_size = max(1, int(image.width * level))
+                img_array = np.array(image)
+                for i in range(0, img_array.shape[0], block_size):
+                    for j in range(0, img_array.shape[1], block_size):
+                        block_color = np.random.randint(0, 256, (1, 1, 3))
+                        img_array[i:i + block_size, j:j + block_size] = block_color
+                image = Image.fromarray(img_array)
+
+            elif distortion == "high_sharpen":
+                enhancer = ImageEnhance.Sharpness(image)
+                image = enhancer.enhance(level)
+
+            elif distortion == "contrast_change":
+                enhancer = ImageEnhance.Contrast(image)
+                image = enhancer.enhance(level)
+
+            else:
+                print(f"[Warning] Distortion type '{distortion}' not implemented.")
+
         except Exception as e:
             print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
+        
         return image
 
+    
+    
     def apply_random_distortions(self, image, distortions=None, levels=None):
         if distortions is None:
             distortions = random.sample(list(self.distortion_levels.keys()), 1)
