@@ -502,3 +502,5 @@ class KADID10KDataset(Dataset):
 
     def __len__(self):
         return len(self.images)
+
+# dataset_kadid10k.py

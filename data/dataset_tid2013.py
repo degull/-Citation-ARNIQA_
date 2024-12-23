@@ -96,6 +96,7 @@ class TID2013Dataset(Dataset):
         ]
 
     # cross-dataset
+     
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         super().__init__()
         self.root = str(root)  # 정확한 파일 경로를 root로 전달
@@ -119,8 +120,8 @@ class TID2013Dataset(Dataset):
         self.reference_paths = [
             os.path.join(os.path.dirname(self.root), "reference_images", img.split("_")[0] + ".BMP")
             for img in self.images
-        ]
-
+        ] 
+        
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([

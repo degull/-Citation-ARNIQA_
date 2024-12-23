@@ -1,6 +1,6 @@
 # KADID
 
-""" import torch
+import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -544,16 +544,22 @@ if __name__ == "__main__":
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
     print("Test Metrics:", format_metrics(test_metrics))
- """
 
-# Training Metrics: {'srcc': [0.9313, 0.9311, 0.932, 0.9317, 0.9318, 0.9317, 0.9319, 0.9317, 0.9319, 0.9317], 'plcc': [0.9367, 0.9365, 0.9373, 0.937, 0.9371, 0.937, 0.937, 0.937, 0.9371, 0.9369]}
-# Validation Metrics: {'srcc': [0.9194, 0.9223, 0.9198, 0.9172, 0.923, 0.9205, 0.9228, 0.9188, 0.918, 0.9185], 'plcc': [0.9249, 0.9273, 0.9258, 0.9228, 0.9278, 0.9254, 0.9283, 0.925, 0.9237, 0.9242]}
-# Test Metrics: {'srcc': [0.9198, 0.9222, 0.9199, 0.9185, 0.9218, 0.9214, 0.9231, 0.9184, 0.919, 0.9197], 'plcc': [0.9256, 0.9275, 0.9263, 0.9241, 0.9267, 0.9265, 0.9287, 0.925, 0.925, 0.9258]}
 
+    # KADID10K 데이터셋에서 테스트 수행
+    test_results = test(args, model, test_dataloader, device)
+
+    # 테스트 결과 출력
+    print("Train(KADID10K)")
+    print(f"\nTest Results on KADID10K Dataset: SRCC = {test_results['srcc']:.4f}, PLCC = {test_results['plcc']:.4f}")
+
+
+#Train(KADID10K)
+#Test Results on KADID10K Dataset: SRCC = 0.9172, PLCC = 0.9213
 
 
 # TID2013
-""" 
+"""  
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -1094,7 +1100,17 @@ if __name__ == "__main__":
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
     print("Test Metrics:", format_metrics(test_metrics))
+
+
+    # TID2013 데이터셋에서 테스트 수행
+    test_results = test(args, model, test_dataloader, device)
+
+    # 테스트 결과 출력
+    print("Train(KADID10K)")
+    print(f"\nTest Results on KADID10K Dataset: SRCC = {test_results['srcc']:.4f}, PLCC = {test_results['plcc']:.4f}")
+
  """
+
  
 
 # Training Metrics: {'srcc': [0.9292, 0.9295, 0.93, 0.9291, 0.9296, 0.9294, 0.9291, 0.9277, 0.9294, 0.9297], 'plcc': [0.9332, 0.9334, 0.9339, 0.9331, 0.9336, 0.9332, 0.9331, 0.9317, 0.9334, 0.9337]}
@@ -1109,7 +1125,7 @@ if __name__ == "__main__":
 # train.py
 
 # Train(KADID) & Test(TID2013)
-import torch
+""" import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -1319,7 +1335,7 @@ if __name__ == "__main__":
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
 
-
+ """
 # Train(KADID10K) & Test(TID2013)
 # Test Results on TID2013 Dataset: SRCC = 0.9280, PLCC = 0.9319
 # 
@@ -1328,8 +1344,9 @@ if __name__ == "__main__":
 
 
 
+
 # Train(TID2013) & Test(KADID)
-""" 
+"""  
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -1546,3 +1563,4 @@ if __name__ == "__main__":
 # 
 # Training Metrics: {'srcc': [0.909, 0.9123, 0.9099, 0.9123, 0.9092, 0.9103, 0.9089, 0.9112, 0.9087, 0.9087], 'plcc': [0.9159, 0.9187, 0.9167, 0.9187, 0.9162, 0.9168, 0.9158, 0.9178, 0.9156, 0.9155]}
 # Validation Metrics: {'srcc': [0.913, 0.9044, 0.8976, 0.9157, 0.9067, 0.9056, 0.905, 0.9113, 0.9106, 0.9028], 'plcc': [0.9183, 0.9107, 0.9053, 0.9208, 0.9129, 0.9121, 0.9112, 0.9177, 0.9172, 0.9095]}
+
