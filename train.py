@@ -1,6 +1,6 @@
 # KADID
 
-import torch
+""" import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -552,7 +552,7 @@ if __name__ == "__main__":
     # 테스트 결과 출력
     print("Train(KADID10K)")
     print(f"\nTest Results on KADID10K Dataset: SRCC = {test_results['srcc']:.4f}, PLCC = {test_results['plcc']:.4f}")
-
+ """
 
 #Train(KADID10K)
 #Test Results on KADID10K Dataset: SRCC = 0.9172, PLCC = 0.9213
@@ -1563,4 +1563,6 @@ if __name__ == "__main__":
 # 
 # Training Metrics: {'srcc': [0.909, 0.9123, 0.9099, 0.9123, 0.9092, 0.9103, 0.9089, 0.9112, 0.9087, 0.9087], 'plcc': [0.9159, 0.9187, 0.9167, 0.9187, 0.9162, 0.9168, 0.9158, 0.9178, 0.9156, 0.9155]}
 # Validation Metrics: {'srcc': [0.913, 0.9044, 0.8976, 0.9157, 0.9067, 0.9056, 0.905, 0.9113, 0.9106, 0.9028], 'plcc': [0.9183, 0.9107, 0.9053, 0.9208, 0.9129, 0.9121, 0.9112, 0.9177, 0.9172, 0.9095]}
+
+
 
