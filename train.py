@@ -1566,3 +1566,250 @@ if __name__ == "__main__":
 
 
 
+
+# Regressor 추출 코드
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, random_split
+import numpy as np
+from dotmap import DotMap
+from pathlib import Path
+from scipy import stats
+from tqdm import tqdm
+from sklearn.linear_model import Ridge
+from data import KADID10KDataset
+from models.simclr import SimCLR
+from utils.utils import parse_config
+from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
+import matplotlib.pyplot as plt
+import joblib
+import yaml
+import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
+
+# Config loader
+def load_config(config_path: str) -> DotMap:
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+    return DotMap(config)
+
+# Save model checkpoint
+def save_checkpoint(model: nn.Module, checkpoint_path: Path, epoch: int, srocc: float) -> None:
+    filename = f"epoch_{epoch}_srocc_{srocc:.3f}.pth"
+    torch.save(model.state_dict(), checkpoint_path / filename)
+    print(f"Checkpoint saved: {filename}")
+
+# Save Ridge Regressor
+def save_ridge_regressor(regressor, output_path: Path) -> None:
+    filename = output_path / "ridge_regressor.pkl"
+    joblib.dump(regressor, filename)
+    print(f"Ridge Regressor saved: {filename}")
+
+# Validation function
+def validate(args, model, dataloader, device):
+    model.eval()
+    srocc_values, plcc_values = [], []
+
+    with torch.no_grad():
+        for batch in dataloader:
+            inputs_A = batch["img_A"].to(device)
+            inputs_B = batch["img_B"].to(device)
+
+            proj_A, proj_B = model(inputs_A, inputs_B)
+            proj_A = F.normalize(proj_A, dim=1).cpu().numpy()
+            proj_B = F.normalize(proj_B, dim=1).cpu().numpy()
+
+            srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
+            plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
+
+            srocc_values.append(srocc)
+            plcc_values.append(plcc)
+
+    avg_srocc = np.mean(srocc_values)
+    avg_plcc = np.mean(plcc_values)
+
+    return avg_srocc, avg_plcc
+
+# Training function
+def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, scaler, device):
+    checkpoint_path = Path(str(args.checkpoint_base_path))
+    checkpoint_path.mkdir(parents=True, exist_ok=True)
+    best_srocc = 0
+
+    for epoch in range(args.training.epochs):
+        model.train()
+        running_loss = 0.0
+        progress_bar = tqdm(train_dataloader, desc=f"Epoch [{epoch + 1}/{args.training.epochs}]")
+
+        for i, batch in enumerate(progress_bar):
+            inputs_A = batch["img_A"].to(device)  # [batch_size, num_crops, channels, height, width]
+            inputs_B = batch["img_B"].to(device)
+
+            # Flatten crops if needed (reshape 5D to 4D)
+            if inputs_A.dim() == 5:
+                batch_size, num_crops, channels, height, width = inputs_A.shape
+                inputs_A = inputs_A.view(-1, channels, height, width)  # [batch_size * num_crops, channels, height, width]
+                inputs_B = inputs_B.view(-1, channels, height, width)
+
+            # Generate hard negatives (proj_negatives)
+            hard_negatives = generate_hard_negatives(inputs_B, scale_factor=0.5)
+            hard_negatives = hard_negatives.view(-1, *hard_negatives.shape[2:])
+            proj_negatives = model.backbone(hard_negatives).mean([2, 3])  # Apply GAP
+            proj_negatives = F.normalize(model.projector(proj_negatives), dim=1)
+
+            # Calculate SE weights (se_weights)
+            features_A = model.backbone(inputs_A)
+            se_weights = features_A.mean(dim=[2, 3])  # Global Average Pooling
+
+            optimizer.zero_grad()
+
+            with torch.amp.autocast(device_type='cuda'):
+                proj_A, proj_B = model(inputs_A, inputs_B)
+                proj_A = F.normalize(proj_A, dim=1)
+                proj_B = F.normalize(proj_B, dim=1)
+
+                # Compute loss using proj_negatives and se_weights
+                loss = model.compute_loss(proj_A, proj_B, proj_negatives, se_weights)
+
+            scaler.scale(loss).backward()
+            clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
+            running_loss += loss.item()
+
+            progress_bar.set_postfix(loss=running_loss / (i + 1))
+
+        lr_scheduler.step()
+
+        # Validation metrics
+        avg_srocc_val, avg_plcc_val = validate(args, model, val_dataloader, device)
+        if avg_srocc_val > best_srocc:
+            best_srocc = avg_srocc_val
+            save_checkpoint(model, checkpoint_path, epoch, best_srocc)
+
+    print("Finished training")
+
+
+# Train Ridge Regressor
+def train_ridge_regressor(model: nn.Module, train_dataloader: DataLoader, device: torch.device):
+    model.eval()
+    embeddings, mos_scores = [], []
+
+    with torch.no_grad():
+        for batch in train_dataloader:
+            inputs_A = batch["img_A"].to(device)  # [batch_size, num_crops, channels, height, width]
+            mos = batch["mos"]
+
+            # Flatten crops if needed (reshape 5D to 4D)
+            if inputs_A.dim() == 5:
+                batch_size, num_crops, channels, height, width = inputs_A.shape
+                inputs_A = inputs_A.view(-1, channels, height, width)  # [batch_size * num_crops, channels, height, width]
+
+            # Extract features using the model's backbone
+            features_A = model.backbone(inputs_A)  # [batch_size * num_crops, embedding_dim, height, width]
+            features_A = features_A.mean([2, 3]).cpu().numpy()  # Global Average Pooling to [batch_size * num_crops, embedding_dim]
+
+            # Repeat MOS scores to match features_A shape
+            repeat_factor = features_A.shape[0] // mos.shape[0]  # Determine how many times to repeat each MOS value
+            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)
+
+            embeddings.append(features_A)
+            mos_scores.append(mos_repeated)
+
+    # Stack all embeddings and MOS scores
+    embeddings = np.vstack(embeddings)  # [total_samples, embedding_dim]
+    mos_scores = np.hstack(mos_scores)  # [total_samples]
+
+    # Train Ridge Regressor
+    regressor = Ridge(alpha=1.0)
+    regressor.fit(embeddings, mos_scores)
+    print("Ridge Regressor trained successfully.")
+    return regressor
+
+# Evaluate Ridge Regressor
+def evaluate_ridge_regressor(regressor, model: nn.Module, dataloader: DataLoader, device: torch.device):
+    model.eval()
+    mos_scores, predictions = [], []
+
+    with torch.no_grad():
+        for batch in dataloader:
+            inputs_A = batch["img_A"].to(device)
+            mos = batch["mos"]
+
+            features_A = model.backbone(inputs_A)
+            features_A = features_A.mean([2, 3]).cpu().numpy()
+
+            prediction = regressor.predict(features_A)
+            mos_scores.extend(mos.cpu().numpy())
+            predictions.extend(prediction)
+
+    return np.array(mos_scores), np.array(predictions)
+
+# Plot results
+def plot_results(mos_scores, predictions):
+    plt.figure(figsize=(8, 6))
+    plt.scatter(mos_scores, predictions, alpha=0.7, label='Predictions vs MOS')
+    plt.plot([min(mos_scores), max(mos_scores)], [min(mos_scores), max(mos_scores)], 'r--', label='Ideal')
+    plt.xlabel('Ground Truth MOS')
+    plt.ylabel('Predicted MOS')
+    plt.title('Ridge Regressor Performance')
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+if __name__ == "__main__":
+    config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
+    args = load_config(config_path)
+
+    device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+    dataset_path = Path(args.data_base_path) / "kadid10k.csv"
+    dataset = KADID10KDataset(dataset_path)
+
+    train_size = int(0.7 * len(dataset))
+    val_size = int(0.1 * len(dataset))
+    test_size = len(dataset) - train_size - val_size
+    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
+
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=args.training.batch_size,
+        shuffle=True,
+        num_workers=args.training.num_workers,
+    )
+    val_dataloader = DataLoader(
+        val_dataset,
+        batch_size=args.training.batch_size,
+        shuffle=False,
+        num_workers=args.training.num_workers,
+    )
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=args.training.batch_size,
+        shuffle=False,
+        num_workers=args.training.num_workers,
+    )
+
+    model = SimCLR(encoder_params=DotMap(args.model.encoder), temperature=args.model.temperature).to(device)
+    optimizer = torch.optim.SGD(
+        model.parameters(),
+        lr=args.training.learning_rate,
+        momentum=args.training.optimizer.momentum,
+        weight_decay=args.training.optimizer.weight_decay,
+    )
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=args.training.lr_scheduler.T_0,
+        T_mult=args.training.lr_scheduler.T_mult,
+        eta_min=args.training.lr_scheduler.eta_min,
+    )
+    scaler = torch.amp.GradScaler()
+
+    train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, scaler, device)
+
+    regressor = train_ridge_regressor(model, train_dataloader, device)
+    save_ridge_regressor(regressor, Path(args.checkpoint_base_path))
+
+    val_mos_scores, val_predictions = evaluate_ridge_regressor(regressor, model, val_dataloader, device)
+    test_mos_scores, test_predictions = evaluate_ridge_regressor(regressor, model, test_dataloader, device)
+
+    plot_results(test_mos_scores, test_predictions)
