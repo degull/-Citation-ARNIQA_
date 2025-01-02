@@ -1,106 +1,267 @@
 import os
 import pandas as pd
 import numpy as np
-from PIL import Image
 import torch
+from torch.utils.data import Dataset
 from torchvision import transforms
-from data.dataset_base_iqa import IQADataset
+import random
+import io
+from PIL import ImageEnhance, ImageFilter, Image
+import io
 
-def center_corners_crop(image: Image, crop_size: int) -> list:
-    """
-    Center crop the image into four corners and the center.
+# 왜곡 유형 매핑
+distortion_types_mapping = {
+    1: "gaussian_blur",
+    2: "lens_blur",
+    3: "motion_blur",
+    4: "color_diffusion",
+    5: "color_shift",
+    6: "color_quantization",
+    7: "color_saturation_1",
+    8: "color_saturation_2",
+    9: "jpeg2000",
+    10: "jpeg",
+    11: "white_noise",
+    12: "white_noise_color_component",
+    13: "impulse_noise",
+    14: "multiplicative_noise",
+    15: "denoise",
+    16: "brighten",
+    17: "darken",
+    18: "mean_shift",
+    19: "jitter",
+    20: "non_eccentricity_patch",
+    21: "pixelate",
+    22: "quantization",
+    23: "color_block",
+    24: "high_sharpen",
+    25: "contrast_change"
+}
 
-    Args:
-        image (PIL.Image): The input image.
-        crop_size (int): The size of the crop.
+# 강도 레벨 정의
+def get_distortion_levels():
+    return {
+        'gaussian_blur': [1, 2, 3, 4, 5],
+        'lens_blur': [1, 2, 3, 4, 5],
+        'motion_blur': [1, 2, 3, 4, 5],
+        'color_diffusion': [0.05, 0.1, 0.2, 0.3, 0.4],
+        'color_shift': [10, 20, 30, 40, 50],
+        'jpeg2000': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'white_noise': [5, 10, 15, 20, 25],
+        'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
+        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5]
+    }
 
-    Returns:
-        list: List of cropped images.
-    """
-    width, height = image.size
-    crops = []
+def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, applied_distortions_B):
+    print(f"[Debug] Verifying Positive Pairs:")
+    print(f" - Distortion A: {distortions_A}, Distortion B: {distortions_B}")
+    print(f" - Applied Level A: {applied_distortions_A}, Applied Level B: {applied_distortions_B}")
 
-    # Center crop
-    left = (width - crop_size) // 2
-    top = (height - crop_size) // 2
-    crops.append(image.crop((left, top, left + crop_size, top + crop_size)))
+    if distortions_A == distortions_B and applied_distortions_A == applied_distortions_B:
+        print(f"[Positive Pair Verification] Success: Distortions match.")
+    else:
+        print(f"[Positive Pair Verification] Error: Distortions do not match.")
 
-    # Four corners crop
-    crops.append(image.crop((0, 0, crop_size, crop_size)))  # Top-left
-    crops.append(image.crop((width - crop_size, 0, width, crop_size)))  # Top-right
-    crops.append(image.crop((0, height - crop_size, crop_size, height)))  # Bottom-left
-    crops.append(image.crop((width - crop_size, height - crop_size, width, height)))  # Bottom-right
+class SPAQDataset(Dataset):
 
-    return crops
+    def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
+        super().__init__()
+        self.root = str(root)
+        self.phase = phase
+        self.crop_size = crop_size
+        self.distortion_levels = get_distortion_levels()
 
-class SPAQDataset(IQADataset):
-    def __init__(self, root: str, phase: str = "train", split_idx: int = 0, crop_size: int = 224):
-        super().__init__(root, phase, split_idx, crop_size)
+        # 정확한 MOS 경로 확인 및 로드
+        scores_csv_path = os.path.join(self.root, "Annotations", "MOS and Image attribute scores.csv")
+        print(f"[Debug] Checking file at path: {scores_csv_path}")
 
-        # Load scores
-        print("Loading scores from Excel...")
-        scores_csv = pd.read_excel(self.root / "Annotations" / "MOS and Image attribute scores.xlsx")
-        print("Scores CSV head:", scores_csv.head())  # Debugging output
+        if not os.path.isfile(scores_csv_path):
+            raise FileNotFoundError(f"MOS 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
 
-        self.images = scores_csv["Image name"].values.tolist()
-        self.images = np.array([self.root / "TestImage" / el for el in self.images])
-        self.mos = np.array(scores_csv["MOS"].values.tolist())
+        scores_csv = pd.read_csv(scores_csv_path)
+        self.images = scores_csv["Image name"].values
+        self.mos = scores_csv["MOS"].values
 
-        print(f"Loaded {len(self.images)} images with corresponding MOS scores.")
+        self.image_paths = [
+            os.path.join(self.root, "TestImage", img) for img in self.images
+        ]
 
-        if self.phase != "all":
-            split_idxs = np.load(self.root / "splits" / f"{self.phase}.npy")[split_idx]
-            split_idxs = np.array(list(filter(lambda x: x != -1, split_idxs)))
-            self.images = self.images[split_idxs]
-            self.mos = self.mos[split_idxs]
+    def transform(self, image: Image) -> torch.Tensor:
+        return transforms.Compose([
+            transforms.Resize((self.crop_size, self.crop_size)),
+            transforms.ToTensor(),
+        ])(image)
 
-    def __getitem__(self, index: int) -> dict:
+    def apply_distortion(self, image, distortion, level):
         try:
-            img_A_orig = Image.open(self.images[index]).convert("RGB")
+            image = image.convert("RGB")  # Ensure the image is in RGB format
+
+            if distortion == "gaussian_blur":
+                image = image.filter(ImageFilter.GaussianBlur(radius=level))
+
+            elif distortion == "lens_blur":
+                image = image.filter(ImageFilter.GaussianBlur(radius=level))
+
+            elif distortion == "motion_blur":
+                image = image.filter(ImageFilter.BoxBlur(level))
+
+            elif distortion == "color_diffusion":
+                diffused = np.array(image).astype(np.float32)
+                diffusion = np.random.uniform(-level * 255, level * 255, size=diffused.shape).astype(np.float32)
+                diffused += diffusion
+                diffused = np.clip(diffused, 0, 255).astype(np.uint8)
+                image = Image.fromarray(diffused)
+
+            elif distortion == "color_shift":
+                shifted = np.array(image).astype(np.float32)
+                shift_amount = np.random.uniform(-level * 255, level * 255, shifted.shape[-1])
+                shifted += shift_amount
+                image = Image.fromarray(np.clip(shifted, 0, 255).astype(np.uint8))
+
+            elif distortion == "jpeg2000":
+                image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
+
+            elif distortion == "jpeg":
+                quality = max(1, min(100, int(100 - (level * 100))))
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG", quality=quality)
+                buffer.seek(0)
+                return Image.open(buffer)
+
+            elif distortion == "white_noise":
+                image_array = np.array(image, dtype=np.float32)
+                noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
+                noisy_image = image_array + noise
+                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+                image = Image.fromarray(noisy_image)
+
+            elif distortion == "impulse_noise":
+                image_array = np.array(image).astype(np.float32)
+                prob = level
+                mask = np.random.choice([0, 1], size=image_array.shape[:2], p=[1 - prob, prob])
+                random_noise = np.random.choice([0, 255], size=(image_array.shape[0], image_array.shape[1], 1))
+                image_array[mask == 1] = random_noise[mask == 1]
+                image_array = np.clip(image_array, 0, 255).astype(np.uint8)
+                return Image.fromarray(image_array)
+
+            elif distortion == "multiplicative_noise":
+                image_array = np.array(image).astype(np.float32)
+                noise = np.random.normal(1, level, image_array.shape)
+                noisy_image = image_array * noise
+                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+                return Image.fromarray(noisy_image)
+
+            elif distortion == "denoise":
+                image = image.filter(ImageFilter.MedianFilter(size=int(level)))
+
+            elif distortion == "brighten":
+                enhancer = ImageEnhance.Brightness(image)
+                image = enhancer.enhance(1 + level)
+
+            elif distortion == "darken":
+                enhancer = ImageEnhance.Brightness(image)
+                image = enhancer.enhance(1 - level)
+
+            elif distortion == "mean_shift":
+                shifted_image = np.array(image).astype(np.float32) + level * 255
+                image = Image.fromarray(np.clip(shifted_image, 0, 255).astype(np.uint8))
+
+            elif distortion == "jitter":
+                jitter = np.random.randint(-level * 255, level * 255, (image.height, image.width, 3))
+                img_array = np.array(image).astype(np.float32) + jitter
+                image = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
+
+            elif distortion == "non_eccentricity_patch":
+                width, height = image.size
+                crop_level = int(level * min(width, height))
+                image = image.crop((crop_level, crop_level, width - crop_level, height - crop_level))
+                image = image.resize((width, height))
+
+            elif distortion == "pixelate":
+                width, height = image.size
+                image = image.resize((width // level, height // level)).resize((width, height), Image.NEAREST)
+
+            elif distortion == "quantization":
+                quantized = (np.array(image) // int(256 / level)) * int(256 / level)
+                image = Image.fromarray(np.clip(quantized, 0, 255).astype(np.uint8))
+
+            elif distortion == "color_block":
+                block_size = max(1, int(image.width * level))
+                img_array = np.array(image)
+                for i in range(0, img_array.shape[0], block_size):
+                    for j in range(0, img_array.shape[1], block_size):
+                        block_color = np.random.randint(0, 256, (1, 1, 3))
+                        img_array[i:i + block_size, j:j + block_size] = block_color
+                image = Image.fromarray(img_array)
+
+            elif distortion == "high_sharpen":
+                enhancer = ImageEnhance.Sharpness(image)
+                image = enhancer.enhance(level)
+
+            elif distortion == "contrast_change":
+                enhancer = ImageEnhance.Contrast(image)
+                image = enhancer.enhance(level)
+
+            else:
+                print(f"[Warning] Distortion type '{distortion}' not implemented.")
+
         except Exception as e:
-            print(f"Error loading image {self.images[index]}: {e}")
-            return {}
+            print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
+        
+        return image
 
-        img_A_orig = img_A_orig.resize((self.crop_size, self.crop_size), Image.BICUBIC)
+    def apply_random_distortions(self, image, distortions=None, levels=None):
+        if distortions is None:
+            distortions = random.sample(list(self.distortion_levels.keys()), 1)
+        if levels is None:
+            levels = [random.choice(self.distortion_levels[distortion]) for distortion in distortions]
 
-        # Center crops for img_A_orig
-        crops = center_corners_crop(img_A_orig, crop_size=self.crop_size)
-        crops = [transforms.ToTensor()(crop) for crop in crops]
+        for distortion, level in zip(distortions, levels):
+            print(f"[Debug] Applying distortion: {distortion} with level: {level}")
+            try:
+                image = self.apply_distortion(image, distortion, level)
+            except Exception as e:
+                print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
+                continue
+        return image
 
-        # Adjust the number of crops
-        target_num_crops = 5  # Center crop + 4 corners
-        crops += [crops[-1]] * (target_num_crops - len(crops)) if len(crops) < target_num_crops else crops[:target_num_crops]
+    def __getitem__(self, index: int):
+        try:
+            img_orig = Image.open(self.image_paths[index]).convert("RGB")
+        except Exception as e:
+            print(f"[Error] Loading image: {self.image_paths[index]}: {e}")
+            return None
 
-        img_A = torch.stack(crops, dim=0)  # Shape: [num_crops, 3, crop_size, crop_size]
+        distortions = random.sample(list(self.distortion_levels.keys()), 1)
+        levels = [random.choice(self.distortion_levels[distortions[0]])]
 
-        # Normalize images
-        img_A = self.normalize(img_A)
+        print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
 
-        # 이미지 B는 img_A와 다르게 처리할 수 있음 (예: 왜곡된 이미지 추가)
-        img_B = img_A.clone()  # 예시로 원본 이미지를 복사하여 사용
+        img_distorted = self.apply_random_distortions(img_orig, distortions, levels)
 
-        mos = self.mos[index]
-
-        # Debugging: Check shapes
-        print(f"img_A shape: {img_A.shape}, img_B shape: {img_B.shape}")
-
-        # 배치 차원 추가하여 차원 변환
-        batch_size = 1  # In DataLoader, this is dynamically set
-        crops = torch.stack(crops, dim=0)  # Shape: [num_crops, 3, crop_size, crop_size]
-
-        # Reshape to maintain batch size and num_crops dimension
-        img_A = crops.unsqueeze(0)  # Shape: [1, num_crops, 3, crop_size, crop_size]
-
-        # Since img_B is just a copy of img_A here, apply the same transformation
-        img_B = img_A.clone()
+        img_orig = self.transform(img_orig)
+        img_distorted = self.transform(img_distorted)
 
         return {
-            "img_A_orig": img_A,  # Shape: [1, num_crops, 3, crop_size, crop_size]
-            "img_B_orig": img_B,
-            "img_A_ds": img_A,
-            "img_B_ds": img_B,
-            "mos": self.mos[index],
+            "img_A": img_orig,
+            "img_B": img_distorted,
+            "mos": torch.tensor(self.mos[index], dtype=torch.float32),
         }
+
 
     def __len__(self):
         return len(self.images)
+
+# SPAQDataset 테스트
+if __name__ == "__main__":
+    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
+    dataset = SPAQDataset(root=dataset_path, phase="train", crop_size=224)
+
+    print(f"Dataset size: {len(dataset)}")
+
+    sample = dataset[0]
+    if sample:
+        print(f"Sample keys: {sample.keys()}")
+        print(f"MOS score: {sample['mos']}")
+        print(f"Image shape: {sample['img'].shape}")

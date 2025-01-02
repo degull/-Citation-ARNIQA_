@@ -204,6 +204,8 @@ from torchvision import transforms
 from pathlib import Path
 import random
 import os
+from PIL import ImageEnhance, ImageFilter, Image
+import io
 
 # 왜곡 유형 매핑
 distortion_types_mapping = {
