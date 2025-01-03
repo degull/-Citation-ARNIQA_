@@ -66,7 +66,25 @@ def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, a
         print(f"[Positive Pair Verification] Error: Distortions do not match.")
 
 class CSIQDataset(Dataset):
+    # 단일
+    #def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
+    #    super().__init__()
+    #    self.root = str(root)
+    #    self.phase = phase
+    #    self.crop_size = crop_size
+    #    self.distortion_levels = get_distortion_levels()
+#
+    #    # MOS 파일 확인 및 로드
+    #    scores_csv_path = os.path.join(self.root, "CSIQ.txt")
+    #    if not os.path.isfile(scores_csv_path):
+    #        raise FileNotFoundError(f"CSIQ.txt 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
+#
+    #    scores_csv = pd.read_csv(scores_csv_path, sep=",")
+    #    self.image_paths = [os.path.join(self.root, img.replace("CSIQ/", "")) for img in scores_csv["dis_img_path"].values]
+    #    self.reference_paths = [os.path.join(self.root, img.replace("CSIQ/", "")) for img in scores_csv["ref_img_path"].values]
+    #    self.mos = scores_csv["score"].values
 
+    # cross-dataset
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         super().__init__()
         self.root = str(root)
@@ -75,21 +93,17 @@ class CSIQDataset(Dataset):
         self.distortion_levels = get_distortion_levels()
 
         # MOS 파일 확인 및 로드
+        self.root = "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
         scores_csv_path = os.path.join(self.root, "CSIQ.txt")
         if not os.path.isfile(scores_csv_path):
             raise FileNotFoundError(f"CSIQ.txt 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
 
         scores_csv = pd.read_csv(scores_csv_path, sep=",")
-        self.images = scores_csv["dis_img_path"].values
-        self.ref_images = scores_csv["ref_img_path"].values
+        self.image_paths = [os.path.join(self.root, img.replace("CSIQ/", "")) for img in scores_csv["dis_img_path"].values]
+        self.reference_paths = [os.path.join(self.root, img.replace("CSIQ/", "")) for img in scores_csv["ref_img_path"].values]
         self.mos = scores_csv["score"].values
 
-        self.image_paths = [
-            os.path.join(self.root, img) for img in self.images
-        ]
-        self.reference_paths = [
-            os.path.join(self.root, img) for img in self.ref_images
-        ]
+
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
@@ -288,8 +302,8 @@ class CSIQDataset(Dataset):
         }
 
     def __len__(self):
-        return len(self.images)
-
+        return len(self.image_paths)
+    
 # CSIQDataset 테스트
 if __name__ == "__main__":
     dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"

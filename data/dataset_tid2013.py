@@ -71,32 +71,33 @@ def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, a
 class TID2013Dataset(Dataset):
 
     # 단일
-    def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
-        super().__init__()
-        self.root = str(root)
-        self.phase = phase
-        self.crop_size = crop_size
-        self.distortion_levels = get_distortion_levels()
+    #def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
+    #    super().__init__()
+    #    self.root = str(root)
+    #    self.phase = phase
+    #    self.crop_size = crop_size
+    #    self.distortion_levels = get_distortion_levels()
+#
+    #    # 정확한 MOS 경로 확인 및 로드
+    #    scores_csv_path = os.path.join(self.root, "mos.csv")
+    #    if not os.path.isfile(scores_csv_path):
+    #        raise FileNotFoundError(f"mos.csv 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
+    #    
+    #    scores_csv = pd.read_csv(scores_csv_path)
+    #    self.images = scores_csv["image_id"].values
+    #    self.mos = scores_csv["mean"].values
+#
+    #    self.image_paths = [
+    #        os.path.join(self.root, "distorted_images", img) for img in self.images
+    #    ]
+    #    self.reference_paths = [
+    #        os.path.join(self.root, "reference_images", img.split("_")[0] + ".BMP")
+    #        for img in self.images
+    #    ]
 
-        # 정확한 MOS 경로 확인 및 로드
-        scores_csv_path = os.path.join(self.root, "mos.csv")
-        if not os.path.isfile(scores_csv_path):
-            raise FileNotFoundError(f"mos.csv 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
-        
-        scores_csv = pd.read_csv(scores_csv_path)
-        self.images = scores_csv["image_id"].values
-        self.mos = scores_csv["mean"].values
-
-        self.image_paths = [
-            os.path.join(self.root, "distorted_images", img) for img in self.images
-        ]
-        self.reference_paths = [
-            os.path.join(self.root, "reference_images", img.split("_")[0] + ".BMP")
-            for img in self.images
-        ]
 
     # cross-dataset
-    """  
+      
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         super().__init__()
         self.root = str(root)  # 정확한 파일 경로를 root로 전달
@@ -121,7 +122,7 @@ class TID2013Dataset(Dataset):
             os.path.join(os.path.dirname(self.root), "reference_images", img.split("_")[0] + ".BMP")
             for img in self.images
         ]
-         """
+         
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
