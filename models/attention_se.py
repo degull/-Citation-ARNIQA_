@@ -81,10 +81,12 @@ class HardNegativeCrossAttention(nn.Module):
     def __init__(self, in_channels):
         super(HardNegativeCrossAttention, self).__init__()
         # Query : 1×1 컨볼루션을 사용해 입력에서 저차원 특징 벡터 생성
-        # 입력의 공간적 정보를 유지하면서 해상도가 다른 데이터 간 유사도를 비교할 수 있는 표현을 만듭
+        # 입력의 공간적 정보를 유지하면서 해상도가 다른 데이터 간 유사도를 비교할 수 있는 표현을 만듦
         self.query_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+
         # Key : Query와 동일한 방식으로 생성되며, 입력 특징 맵을 다른 해상도에서 추출된 Key와 비교
         self.key_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        
         # Value : 입력의 전체 정보를 보존하는 고차원 특징을 생성
         self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
         self.softmax = nn.Softmax(dim=-1)

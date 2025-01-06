@@ -4455,7 +4455,7 @@ if __name__ == "__main__":
 
 
 # Train(SPAQ) & Test(CSIQ)
-""" 
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -4665,7 +4665,7 @@ if __name__ == "__main__":
 
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
- """
+
 
 
 # Train(TID2013) & Test(SPAQ)
@@ -5142,6 +5142,7 @@ if __name__ == "__main__":
 
 
 # Grad-CAM
+""" 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -5425,3 +5426,4 @@ if __name__ == "__main__":
 
     # Grad-CAM 시각화
     visualize_gradcam(args, model, val_dataloader, device)
+ """
