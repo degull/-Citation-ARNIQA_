@@ -93,7 +93,7 @@ class ResNetSE(nn.Module):
         super(ResNetSE, self).__init__()
         base_model = resnet50(pretrained=True)
 
-        # Extract layers from ResNet-50
+        # ResNet-50의 기본 구조 (conv1, layer1~layer4)
         self.layer0 = nn.Sequential(
             base_model.conv1, base_model.bn1, base_model.relu, base_model.maxpool
         )
@@ -102,12 +102,13 @@ class ResNetSE(nn.Module):
         self.layer3 = base_model.layer3
         self.layer4 = base_model.layer4
 
-        # Integrate SE blocks after each ResNet layer
+        # 각 ResNet 레이어 출력 뒤에 SEBlock 추가
         self.se1 = SEBlock(256)
         self.se2 = SEBlock(512)
         self.se3 = SEBlock(1024)
         self.se4 = SEBlock(2048)
 
+    # ResNet의 각 레이어 출력에 대해 SEBlock 적용
     def forward(self, x):
         x = self.layer0(x)
         x = self.layer1(x)
@@ -122,3 +123,6 @@ class ResNetSE(nn.Module):
 
 
 # resnet_se.py
+
+# 각 레이어 뒤에 SEBlock을 추가하여 채널별 중요도 학습을 강화
+# 기존 ResNet보다 채널별 중요도를 더 잘 반영

@@ -37,26 +37,50 @@ class HardNegativeCrossAttention(nn.Module):
 import torch
 import torch.nn as nn
 
-# 입력 이미지 -> ResNet(Backbone) -> 특징 맵 변환(B x C x H x W)
 class DistortionAttention(nn.Module):
     def __init__(self, in_channels):
         super(DistortionAttention, self).__init__()
-        self.conv = nn.Conv2d(in_channels, 1, kernel_size=1)    # nn.Conv2d -> 입력채널 C를 1로 축소 (B x 1 x H x W 크기의 attentio map 생성) => 공간 중요도 학습
-        self.sigmoid = nn.Sigmoid()     # attention map 값을 0-1 사이로 정규화 --> 각 픽셀이 얼마나 중요한지 나타냄
+        self.conv = nn.Conv2d(in_channels, 1, kernel_size=1)    
+        self.sigmoid = nn.Sigmoid()     
 
     def forward(self, x, se_weights=None):
-        attention_map = self.sigmoid(self.conv(x))  # Attention Map 생성
+        attention_map = self.sigmoid(self.conv(x)) 
         if se_weights is not None:
             # SE 가중치 결합
             combined_weights = attention_map * se_weights.unsqueeze(2).unsqueeze(3)
             return x * combined_weights
+        
+        ## 원본 입력 데이터 x가 직접 Value 역할
         return x * attention_map
+    
+"""      
+class DistortionAttentionWithQKV(nn.Module):
+    def __init__(self, in_channels):
+        super(DistortionAttentionWithQKV, self).__init__()
+        self.query_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)   # 출력 채널 수는 C/8, Query를 저차원 특징으로 변환
+        self.key_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1) # 저차원 표현
+        self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)    # 출력 채널 수는 입력 채널 수 C와 동일하여, 고차원 정보를 유지
+        self.softmax = nn.Softmax(dim=-1)   # Query와 Key의 내적 결과를 정규화하여 Attention Map을 생성
 
+    def forward(self, x):
+        b, c, h, w = x.size()   # 배치사이즈 B, 채널수C, 높이H, 너비W
+
+        query = self.query_conv(x).view(b, -1, h * w).permute(0, 2, 1)  # 입력특징맵에 1x1 convolution 적용해 Query 생성
+        key = self.key_conv(x).view(b, -1, h * w)
+        value = self.value_conv(x).view(b, -1, h * w)
+
+        attention_map = self.softmax(torch.bmm(query, key))
+        out = torch.bmm(value, attention_map.permute(0, 2, 1))
+        out = out.view(b, c, h, w)
+
+        return out + x
+
+ """
 
 class HardNegativeCrossAttention(nn.Module):
     def __init__(self, in_channels):
         super(HardNegativeCrossAttention, self).__init__()
-        # Quert : 1×1 컨볼루션을 사용해 입력에서 저차원 특징 벡터 생성
+        # Query : 1×1 컨볼루션을 사용해 입력에서 저차원 특징 벡터 생성
         # 입력의 공간적 정보를 유지하면서 해상도가 다른 데이터 간 유사도를 비교할 수 있는 표현을 만듭
         self.query_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
         # Key : Query와 동일한 방식으로 생성되며, 입력 특징 맵을 다른 해상도에서 추출된 Key와 비교

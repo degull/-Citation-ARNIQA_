@@ -4014,7 +4014,7 @@ if __name__ == "__main__":
 
 
 # Train(SPAQ) & Test(TID2013)
-import torch
+""" import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -4223,10 +4223,18 @@ if __name__ == "__main__":
 
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
+ """
+
+
+# Test Results on TID2013 Dataset: SRCC = 0.9233, PLCC = 0.9270
+# 
+# Training Metrics: {'loss': [0.3467, 0.3222, 0.3299, 0.2938, 0.2956, 0.2939, 0.2813, 0.2725, 0.2557, 0.2528], 'srcc': [0.892, 0.8937, 0.8871, 0.8962, 0.8929, 0.8893, 0.8928, 0.8943, 0.8942, 0.8905], 'plcc': [0.8947, 0.8963, 0.8897, 0.8986, 0.8954, 0.8919, 0.8952, 0.8968, 0.8966, 0.8928]}
+# Validation Metrics: {'srcc': [0.877, 0.8869, 0.8896, 0.8836, 0.888, 0.8874, 0.8995, 0.8748, 0.8898, 0.8761], 'plcc': [0.8771, 0.8873, 0.8918, 0.8854, 0.8887, 0.8889, 0.9014, 0.8768, 0.8904, 0.8775]}
+
 
 
 # Train(SPAQ) & Test(KADID)
-import torch
+""" import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -4235,7 +4243,7 @@ from pathlib import Path
 from scipy import stats
 from tqdm import tqdm
 from sklearn.linear_model import Ridge
-from data import TID2013Dataset, KADID10KDataset
+from data import SPAQDataset, KADID10KDataset
 from models.simclr import SimCLR
 from utils.utils import parse_config
 from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
@@ -4392,7 +4400,7 @@ if __name__ == "__main__":
 
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
-    # CSIQ Dataset (Training and Validation)
+    # SPAQ Dataset (Training and Validation)
     SPAQ_dataset_path = Path("E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ")
     SPAQ_dataset = SPAQDataset(SPAQ_dataset_path)
 
@@ -4404,10 +4412,10 @@ if __name__ == "__main__":
     train_dataloader = DataLoader(train_dataset, batch_size=args.training.batch_size, shuffle=True, num_workers=4)
     val_dataloader = DataLoader(val_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
 
-    # TID2013 Dataset (Test)
-    tid_dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013/mos.csv"
-    tid_dataset = TID2013Dataset(Path(tid_dataset_path))
-    test_dataloader = DataLoader(tid_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
+    # KADID10K Dataset
+    kadid_dataset_path = Path("E:/ARNIQA - SE - mix/ARNIQA/dataset/KADID10K/kadid10k.csv")
+    kadid_dataset = KADID10KDataset(kadid_dataset_path)
+    test_dataloader = DataLoader(kadid_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
 
     # Model initialization
     model = SimCLR(encoder_params=args.model.encoder, temperature=args.model.temperature).to(device)
@@ -4427,8 +4435,8 @@ if __name__ == "__main__":
 
     # Testing on SPAQ
     test_results = test(args, model, test_dataloader, device)
-    print("Train(SPAQ) & Test(TID2013)")
-    print(f"\nTest Results on TID2013 Dataset: SRCC = {test_results['srcc']:.4f}, PLCC = {test_results['plcc']:.4f}")
+    print("Train(SPAQ) & Test(KADID)")
+    print(f"\nTest Results on KADID Dataset: SRCC = {test_results['srcc']:.4f}, PLCC = {test_results['plcc']:.4f}")
 
     def format_metrics(metrics):
         return {key: [round(value, 4) for value in values] for key, values in metrics.items()}
@@ -4436,12 +4444,228 @@ if __name__ == "__main__":
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
 
+ """
 
+# Train(SPAQ) & Test(KADID)
+# 
+# Test Results on KADID Dataset: SRCC = 0.9078, PLCC = 0.9149
+# 
+# Training Metrics: {'loss': [0.4536, 0.3948, 0.3889, 0.3834, 0.3778, 0.3515, 0.3514, 0.3444, 0.3251, 0.3234], 'srcc': [0.8646, 0.8724, 0.8675, 0.8688, 0.8658, 0.8703, 0.8718, 0.8673, 0.8681, 0.866], 'plcc': [0.8701, 0.8774, 0.8728, 0.8739, 0.8708, 0.8751, 0.8763, 0.8719, 0.8728, 0.8707]}
+# Validation Metrics: {'srcc': [0.8648, 0.8485, 0.873, 0.8713, 0.8609, 0.8756, 0.8636, 0.8726, 0.8836, 0.874], 'plcc': [0.8717, 0.8551, 0.878, 0.8765, 0.8651, 0.8804, 0.8692, 0.8786, 0.8898, 0.8793]}
 
 
 # Train(SPAQ) & Test(CSIQ)
+""" 
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, random_split
+import numpy as np
+from dotmap import DotMap
+from pathlib import Path
+from scipy import stats
+from tqdm import tqdm
+from sklearn.linear_model import Ridge
+from data import SPAQDataset, CSIQDataset
+from models.simclr import SimCLR
+from utils.utils import parse_config
+from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
+import matplotlib.pyplot as plt
+import random
+from typing import Tuple
+import argparse
+import yaml
+from sklearn.model_selection import GridSearchCV
+import torch
+import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
+
+# Config loader
+def load_config(config_path: str) -> DotMap:
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+    return DotMap(config)
+
+def save_checkpoint(model: nn.Module, checkpoint_path: Path, epoch: int, srocc: float) -> None:
+    filename = f"epoch_{epoch}_srocc_{srocc:.3f}.pth"
+    torch.save(model.state_dict(), checkpoint_path / filename)
+
+def validate(args, model, dataloader, device):
+    model.eval()
+    srocc_values, plcc_values = [], []
+
+    with torch.no_grad():
+        for batch in dataloader:
+            inputs_A = batch["img_A"].to(device)
+            inputs_B = batch["img_B"].to(device)
+
+            proj_A, proj_B = model(inputs_A, inputs_B)
+            proj_A = F.normalize(proj_A, dim=1).detach().cpu().numpy()
+            proj_B = F.normalize(proj_B, dim=1).detach().cpu().numpy()
+
+            srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
+            plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
+
+            srocc_values.append(srocc)
+            plcc_values.append(plcc)
+
+    avg_srocc = np.mean(srocc_values)
+    avg_plcc = np.mean(plcc_values)
+
+    return avg_srocc, avg_plcc
+
+def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler, scaler, device):
+    checkpoint_path = Path(str(args.checkpoint_base_path))
+    checkpoint_path.mkdir(parents=True, exist_ok=True)
+    best_srocc = 0
+
+    train_metrics = {'loss': [], 'srcc': [], 'plcc': []}
+    val_metrics = {'srcc': [], 'plcc': []}
+
+    for epoch in range(args.training.epochs):
+        model.train()
+        running_loss = 0.0
+        srocc_values, plcc_values = [], []
+
+        progress_bar = tqdm(train_dataloader, desc=f"Epoch [{epoch + 1}/{args.training.epochs}]")
+
+        for i, batch in enumerate(progress_bar):
+            inputs_A = batch["img_A"].to(device)
+            inputs_B = batch["img_B"].to(device)
+
+            # Flatten crops if needed (5D -> 4D)
+            if inputs_A.dim() == 5:
+                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
+            if inputs_B.dim() == 5:
+                inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
+
+            optimizer.zero_grad()
+
+            with torch.amp.autocast(device_type='cuda'):
+                # Process inputs_A and inputs_B through model
+                proj_A, proj_B = model(inputs_A, inputs_B)
+                proj_A = F.normalize(proj_A, dim=1)
+                proj_B = F.normalize(proj_B, dim=1)
+
+                # Generate SE weights from features_A
+                features_A = model.backbone(inputs_A)
+                se_weights = features_A.mean(dim=[2, 3])  # SE weights for inputs_A
+
+                # Generate hard negatives
+                features_B = model.backbone(inputs_B)  # Use inputs_B for negatives
+                features_B = features_B.mean([2, 3])  # GAP for negatives
+                proj_negatives = model.projector(features_B)
+                proj_negatives = F.normalize(proj_negatives, dim=1)
+
+                # Compute loss with SE weights and negatives
+                loss = model.compute_loss(proj_A, proj_B, proj_negatives, se_weights)
+
+            scaler.scale(loss).backward()
+            clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
+
+            running_loss += loss.item()
+            progress_bar.set_postfix(loss=running_loss / (i + 1))
+
+            # Calculate SRCC and PLCC for the batch
+            srocc, _ = stats.spearmanr(proj_A.detach().cpu().numpy().flatten(), proj_B.detach().cpu().numpy().flatten())
+            plcc, _ = stats.pearsonr(proj_A.detach().cpu().numpy().flatten(), proj_B.detach().cpu().numpy().flatten())
+            srocc_values.append(srocc)
+            plcc_values.append(plcc)
+
+        train_metrics['loss'].append(running_loss / len(train_dataloader))
+        train_metrics['srcc'].append(np.mean(srocc_values))
+        train_metrics['plcc'].append(np.mean(plcc_values))
+
+        lr_scheduler.step()
+
+        avg_srocc_val, avg_plcc_val = validate(args, model, val_dataloader, device)
+        val_metrics['srcc'].append(avg_srocc_val)
+        val_metrics['plcc'].append(avg_plcc_val)
+
+        if avg_srocc_val > best_srocc:
+            best_srocc = avg_srocc_val
+            save_checkpoint(model, checkpoint_path, epoch, best_srocc)
+
+    print("Training complete. Best SRCC:", best_srocc)
+    return train_metrics, val_metrics
 
 
+def test(args, model, test_dataloader, device):
+    model.eval()
+    srocc_values, plcc_values = [], []
+
+    with torch.no_grad():
+        for batch in test_dataloader:
+            inputs_A = batch["img_A"].to(device)
+            inputs_B = batch["img_B"].to(device)
+
+            proj_A, proj_B = model(inputs_A, inputs_B)
+            proj_A = F.normalize(proj_A, dim=1).detach().cpu().numpy()
+            proj_B = F.normalize(proj_B, dim=1).detach().cpu().numpy()
+
+            srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
+            plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
+
+            srocc_values.append(srocc)
+            plcc_values.append(plcc)
+
+    avg_srocc_test = np.mean(srocc_values)
+    avg_plcc_test = np.mean(plcc_values)
+    return {'srcc': avg_srocc_test, 'plcc': avg_plcc_test}
+
+
+
+if __name__ == "__main__":
+    config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
+    args = load_config(config_path)
+
+    device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+
+    # SPAQ Dataset (Training and Validation)
+    SPAQ_dataset_path = Path("E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ")
+    SPAQ_dataset = SPAQDataset(SPAQ_dataset_path)
+
+    train_size = int(0.7 * len(SPAQ_dataset))
+    val_size = int(0.1 * len(SPAQ_dataset))
+    test_size = len(SPAQ_dataset) - train_size - val_size
+    train_dataset, val_dataset, _ = random_split(SPAQ_dataset, [train_size, val_size, test_size])
+
+    train_dataloader = DataLoader(train_dataset, batch_size=args.training.batch_size, shuffle=True, num_workers=4)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
+
+    # CSIQDataset (Test)
+    CSIQ_dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
+    CSIQ_dataset = CSIQDataset(Path(CSIQ_dataset_path))
+    test_dataloader = DataLoader(CSIQ_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
+
+    # Model initialization
+    model = SimCLR(encoder_params=args.model.encoder, temperature=args.model.temperature).to(device)
+    optimizer = torch.optim.SGD(
+        model.parameters(),
+        lr=args.training.learning_rate,
+        momentum=args.training.optimizer.momentum,
+        weight_decay=args.training.optimizer.weight_decay,
+    )
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=args.training.lr_scheduler.T_0, T_mult=args.training.lr_scheduler.T_mult
+    )
+    scaler = torch.amp.GradScaler()
+
+    # Training on KADID10K
+    train_metrics, val_metrics = train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler, scaler, device)
+
+    # Testing on SPAQ
+    test_results = test(args, model, test_dataloader, device)
+    print("Train(SPAQ) & Test(CSIQ)")
+    print(f"\nTest Results on CSIQ Dataset: SRCC = {test_results['srcc']:.4f}, PLCC = {test_results['plcc']:.4f}")
+
+    def format_metrics(metrics):
+        return {key: [round(value, 4) for value in values] for key, values in metrics.items()}
+
+    print("\nTraining Metrics:", format_metrics(train_metrics))
+    print("Validation Metrics:", format_metrics(val_metrics))
+ """
 
 
 # Train(TID2013) & Test(SPAQ)
@@ -4915,3 +5139,289 @@ if __name__ == "__main__":
 
     plot_results(test_mos_scores, test_predictions) """
 
+
+
+# Grad-CAM
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, random_split
+import numpy as np
+from dotmap import DotMap
+from pathlib import Path
+from scipy import stats
+from tqdm import tqdm
+from sklearn.linear_model import Ridge
+from data import KADID10KDataset
+from models.simclr import SimCLR
+from utils.utils import parse_config
+from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
+import matplotlib.pyplot as plt
+import yaml
+import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
+import cv2
+
+# Config loader
+def load_config(config_path: str) -> DotMap:
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+    return DotMap(config)
+
+def save_checkpoint(model: nn.Module, checkpoint_path: Path, epoch: int, srocc: float) -> None:
+    filename = f"epoch_{epoch}_srocc_{srocc:.3f}.pth"
+    torch.save(model.state_dict(), checkpoint_path / filename)
+
+class GradCAM:
+    def __init__(self, model, target_layer_name):
+        self.model = model
+        self.target_layer_name = target_layer_name
+        self.gradients = None
+        self.activations = None
+        self.hook_layers()
+
+    def hook_layers(self):
+        def forward_hook(module, input, output):
+            self.activations = output
+
+        def backward_hook(module, grad_input, grad_output):
+            self.gradients = grad_output[0]
+
+        for name, module in self.model.named_modules():
+            if name == self.target_layer_name:
+                module.register_forward_hook(forward_hook)
+                module.register_backward_hook(backward_hook)
+
+    def generate(self, input_tensor, class_idx=None):
+        self.model.eval()
+        output = self.model(input_tensor)
+
+        # Grad-CAM을 위한 class index 설정
+        if class_idx is None:
+            class_idx = output.argmax(dim=1)[0].item()  # 첫 번째 배치 기준으로 index 추출
+
+        self.model.zero_grad()
+        target = output[:, class_idx].sum()  # 스칼라 값으로 변환
+        target.backward(retain_graph=True)
+
+        gradients = self.gradients.detach().cpu().numpy()
+        activations = self.activations.detach().cpu().numpy()
+
+        weights = np.mean(gradients, axis=(2, 3))
+        cam = np.sum(weights[:, :, None, None] * activations, axis=1)
+        cam = np.maximum(cam, 0)
+        cam = cam[0]
+        cam = (cam - cam.min()) / (cam.max() - cam.min())
+        return cam
+
+
+
+    def overlay_cam(self, img, cam, alpha=0.5):
+        cam_resized = cv2.resize(cam, (img.shape[1], img.shape[0]))
+        heatmap = cv2.applyColorMap(np.uint8(255 * cam_resized), cv2.COLORMAP_JET)
+        overlay = cv2.addWeighted(img, alpha, heatmap, 1 - alpha, 0)
+        return overlay
+
+def visualize_gradcam(args, model, dataloader, device):
+    grad_cam = GradCAM(model, target_layer_name="backbone.layer4")
+
+    for batch in dataloader:
+        inputs = batch["img_A"].to(device)
+        inputs = inputs[:2]  # 첫 번째 이미지만 선택
+
+        # 입력 텐서 차원 변환
+        if inputs.dim() == 5:  # [batch_size, num_crops, C, H, W]
+            inputs = inputs.view(-1, *inputs.shape[2:])  # [batch_size * num_crops, C, H, W]
+
+        # Grad-CAM 생성
+        cam = grad_cam.generate(inputs)
+
+        # 첫 번째 이미지 선택 및 정규화
+        img = inputs[0].permute(1, 2, 0).cpu().numpy()  # [H, W, C]
+        img = (img - img.min()) / (img.max() - img.min())  # [0, 1]로 정규화
+        img = (img * 255).astype(np.uint8)  # [0, 255] 범위로 변환
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # OpenCV 형식으로 변환
+
+        # Grad-CAM 히트맵 생성
+        cam_resized = cv2.resize(cam, (img.shape[1], img.shape[0]))  # 원본 이미지 크기로 리사이즈
+        heatmap = cv2.applyColorMap(np.uint8(255 * cam_resized), cv2.COLORMAP_JET)  # 히트맵 생성
+        overlay = cv2.addWeighted(img, 0.5, heatmap, 0.5, 0)  # 히트맵과 원본 이미지 오버레이
+
+        # 시각화
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 3, 1)
+        plt.title("Original Image")
+        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        plt.axis("off")
+
+        plt.subplot(1, 3, 2)
+        plt.title("Grad-CAM Heatmap")
+        plt.imshow(cam, cmap="jet")
+        plt.axis("off")
+
+        plt.subplot(1, 3, 3)
+        plt.title("Overlay Image")
+        plt.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
+        plt.axis("off")
+
+        plt.show()
+        break
+
+
+
+
+def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, scaler, device):
+    checkpoint_path = Path(str(args.checkpoint_base_path))
+    checkpoint_path.mkdir(parents=True, exist_ok=True)
+    best_srocc = 0
+
+    # Initialize metrics
+    train_metrics = {'srcc': [], 'plcc': []}
+    val_metrics = {'srcc': [], 'plcc': []}
+    test_metrics = {'srcc': [], 'plcc': []}
+
+    for epoch in range(args.training.epochs):
+        model.train()
+        running_loss = 0.0
+        srocc_values, plcc_values = [], []
+        progress_bar = tqdm(train_dataloader, desc=f"Epoch [{epoch + 1}/{args.training.epochs}]")
+
+        for i, batch in enumerate(progress_bar):
+            inputs_A = batch["img_A"].to(device)
+            inputs_B = batch["img_B"].to(device)
+
+            # Flatten crops if needed
+            if inputs_A.dim() == 5:
+                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
+                inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
+
+            # Generate hard negatives
+            print(f"[Debug] Batch {i}: Generating hard negatives...")
+            hard_negatives = generate_hard_negatives(inputs_B, scale_factor=0.5)
+            print(f"[Debug] Batch {i}: Hard negatives shape: {hard_negatives.shape}")
+
+            hard_negatives = hard_negatives.view(-1, *hard_negatives.shape[2:])
+
+            # Process hard negatives through backbone and projector
+            print(f"[Debug] Batch {i}: Processing hard negatives through backbone...")
+            backbone_output = model.backbone(hard_negatives)
+            print(f"[Debug] Batch {i}: Backbone output shape: {backbone_output.shape}")
+
+            gap_output = backbone_output.mean([2, 3])  # Global Average Pooling
+            proj_negatives = model.projector(gap_output)  # [batch_size * num_crops, embedding_dim]
+            proj_negatives = F.normalize(proj_negatives, dim=1)
+            print(f"[Debug] Batch {i}: Projector output (negatives) shape: {proj_negatives.shape}")
+
+            optimizer.zero_grad()
+
+            with torch.amp.autocast(device_type='cuda'):
+                # Process inputs_A and inputs_B through model
+                proj_A, proj_B = model(inputs_A, inputs_B)
+                proj_A = F.normalize(proj_A, dim=1)
+                proj_B = F.normalize(proj_B, dim=1)
+                print(f"[Debug] Batch {i}: proj_A shape = {proj_A.shape}, proj_B shape = {proj_B.shape}")
+
+                # Calculate SE weights from features_A
+                features_A = model.backbone(inputs_A)
+                se_weights = features_A.mean(dim=[2, 3])  # Calculate SE weights
+                print(f"[Debug] Batch {i}: SE weights shape: {se_weights.shape}")
+
+                # Compute loss with SE weights
+                loss = model.compute_loss(proj_A, proj_B, proj_negatives, se_weights)
+                print(f"[Debug] Batch {i}: Loss value: {loss.item()}")
+
+            # Debugging: Check for NaN/Inf values
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"[Debug] Batch {i}: Loss is NaN or Inf. Skipping this batch.")
+                continue
+
+            scaler.scale(loss).backward()
+            clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
+            running_loss += loss.item()
+
+            # SRCC and PLCC for the batch
+            srocc, _ = stats.spearmanr(proj_A.detach().cpu().flatten(), proj_B.detach().cpu().flatten())
+            plcc, _ = stats.pearsonr(proj_A.detach().cpu().flatten(), proj_B.detach().cpu().flatten())
+            srocc_values.append(srocc)
+            plcc_values.append(plcc)
+
+            progress_bar.set_postfix(loss=running_loss / (i + 1))
+
+        # Average SRCC and PLCC for the epoch
+        train_metrics['srcc'].append(np.mean(srocc_values))
+        train_metrics['plcc'].append(np.mean(plcc_values))
+
+        lr_scheduler.step()
+
+        # Validation metrics
+        avg_srocc_val, avg_plcc_val = validate(args, model, val_dataloader, device)
+        val_metrics['srcc'].append(avg_srocc_val)
+        val_metrics['plcc'].append(avg_plcc_val)
+
+        # Test metrics
+        avg_srocc_test, avg_plcc_test = validate(args, model, test_dataloader, device)
+        test_metrics['srcc'].append(avg_srocc_test)
+        test_metrics['plcc'].append(avg_plcc_test)
+
+        if avg_srocc_val > best_srocc:
+            best_srocc = avg_srocc_val
+            save_checkpoint(model, checkpoint_path, epoch, best_srocc)
+
+    print("Finished training")
+    return train_metrics, val_metrics, test_metrics
+
+
+
+def validate(args, model, dataloader, device):
+    model.eval()
+    srocc_values, plcc_values = [], []
+
+    with torch.no_grad():
+        for batch in dataloader:
+            inputs_A = batch["img_A"].to(device)
+            inputs_B = batch["img_B"].to(device)
+            proj_A, proj_B = model(inputs_A, inputs_B)
+
+            proj_A = F.normalize(proj_A, dim=1).cpu().numpy()
+            proj_B = F.normalize(proj_B, dim=1).cpu().numpy()
+
+            srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
+            plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
+
+            srocc_values.append(srocc)
+            plcc_values.append(plcc)
+
+    avg_srocc = np.mean(srocc_values)
+    avg_plcc = np.mean(plcc_values)
+    return avg_srocc, avg_plcc
+
+if __name__ == "__main__":
+    config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
+    args = load_config(config_path)
+
+    device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+    dataset_path = Path(args.data_base_path) / "kadid10k.csv"
+    dataset = KADID10KDataset(dataset_path)
+
+    train_size = int(0.7 * len(dataset))
+    val_size = int(0.1 * len(dataset))
+    test_size = len(dataset) - train_size - val_size
+    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
+
+    train_dataloader = DataLoader(train_dataset, batch_size=args.training.batch_size, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.training.batch_size, shuffle=False)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.training.batch_size, shuffle=False)
+
+    model = SimCLR(encoder_params=DotMap(args.model.encoder), temperature=args.model.temperature).to(device)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.training.learning_rate, momentum=args.training.optimizer.momentum)
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10)
+    scaler = torch.cuda.amp.GradScaler()
+
+    # train 함수에 test_dataloader 추가
+    train_metrics, val_metrics, test_metrics = train(
+        args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, scaler, device
+    )
+
+    # Grad-CAM 시각화
+    visualize_gradcam(args, model, val_dataloader, device)
