@@ -122,7 +122,7 @@ class TID2013Dataset(Dataset):
             os.path.join(os.path.dirname(self.root), "reference_images", img.split("_")[0] + ".BMP")
             for img in self.images
         ]
-         
+        
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([

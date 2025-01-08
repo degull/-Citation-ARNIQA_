@@ -1,6 +1,6 @@
 # KADID
-
-""" import torch
+ 
+import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -74,7 +74,7 @@ def debug_ridge_regressor(embeddings, mos_scores):
     plt.grid()
     plt.show()
 
-def validate(args, model, dataloader, device):
+def validate(model, dataloader, device):
     model.eval()
     srocc_values, plcc_values = [], []
 
@@ -83,133 +83,81 @@ def validate(args, model, dataloader, device):
             inputs_A = batch["img_A"].to(device)
             inputs_B = batch["img_B"].to(device)
 
-            # Flatten crops if needed
+            # Reshape inputs if 5D
             if inputs_A.dim() == 5:
                 inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
+            if inputs_B.dim() == 5:
                 inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
 
             proj_A, proj_B = model(inputs_A, inputs_B)
 
-            # Normalize projections for SRCC/PLCC calculation
-            proj_A = F.normalize(proj_A, dim=1).detach().cpu().numpy()
-            proj_B = F.normalize(proj_B, dim=1).detach().cpu().numpy()
+            proj_A = F.normalize(proj_A, dim=1).cpu().numpy()
+            proj_B = F.normalize(proj_B, dim=1).cpu().numpy()
 
-            # Calculate SRCC and PLCC
             srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
             plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
 
             srocc_values.append(srocc)
             plcc_values.append(plcc)
 
-    avg_srocc = np.mean(srocc_values)
-    avg_plcc = np.mean(plcc_values)
+    return np.mean(srocc_values), np.mean(plcc_values)
 
-    return avg_srocc, avg_plcc
-
-
-def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, scaler, device):
-    checkpoint_path = Path(str(args.checkpoint_base_path))
-    checkpoint_path.mkdir(parents=True, exist_ok=True)
+def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler, scaler, device):
     best_srocc = 0
+    train_metrics = {"loss": []}
+    val_metrics = {"srcc": [], "plcc": []}
 
-    # Initialize metrics
-    train_metrics = {'srcc': [], 'plcc': []}
-    val_metrics = {'srcc': [], 'plcc': []}
-    test_metrics = {'srcc': [], 'plcc': []}
-
-    for epoch in range(args.training.epochs):
+    for epoch in range(int(args.training.epochs)):  # 'epochs'를 정수형으로 변환
         model.train()
         running_loss = 0.0
-        srocc_values, plcc_values = [], []
         progress_bar = tqdm(train_dataloader, desc=f"Epoch [{epoch + 1}/{args.training.epochs}]")
 
-        for i, batch in enumerate(progress_bar):
+        for batch in progress_bar:
             inputs_A = batch["img_A"].to(device)
             inputs_B = batch["img_B"].to(device)
 
-            # Flatten crops if needed
+            # Reshape inputs if 5D
             if inputs_A.dim() == 5:
                 inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
+            if inputs_B.dim() == 5:
                 inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
-
-            # Generate hard negatives
-            print(f"[Debug] Batch {i}: Generating hard negatives...")
-            hard_negatives = generate_hard_negatives(inputs_B, scale_factor=0.5)
-            print(f"[Debug] Batch {i}: Hard negatives shape: {hard_negatives.shape}")
-
-            hard_negatives = hard_negatives.view(-1, *hard_negatives.shape[2:])
-            verify_hard_negatives(inputs_B.shape, hard_negatives.shape)
-
-            # Process hard negatives through backbone and projector
-            print(f"[Debug] Batch {i}: Processing hard negatives through backbone...")
-            backbone_output = model.backbone(hard_negatives)
-            print(f"[Debug] Batch {i}: Backbone output shape: {backbone_output.shape}")
-
-            gap_output = backbone_output.mean([2, 3])  # Global Average Pooling
-            proj_negatives = model.projector(gap_output)  # [batch_size * num_crops, embedding_dim]
-            proj_negatives = F.normalize(proj_negatives, dim=1)
-            print(f"[Debug] Batch {i}: Projector output (negatives) shape: {proj_negatives.shape}")
 
             optimizer.zero_grad()
 
             with torch.amp.autocast(device_type='cuda'):
-                # Process inputs_A and inputs_B through model
                 proj_A, proj_B = model(inputs_A, inputs_B)
                 proj_A = F.normalize(proj_A, dim=1)
                 proj_B = F.normalize(proj_B, dim=1)
-                print(f"[Debug] Batch {i}: proj_A shape = {proj_A.shape}, proj_B shape = {proj_B.shape}")
 
-                # Calculate SE weights from features_A
                 features_A = model.backbone(inputs_A)
-                se_weights = features_A.mean(dim=[2, 3])  # Calculate SE weights
-                print(f"[Debug] Batch {i}: SE weights shape: {se_weights.shape}")
+                se_weights = features_A.mean(dim=[2, 3])  # SE weights
+                proj_negatives = proj_B  # Using proj_B as negatives for simplicity
 
-                # Compute loss with SE weights
                 loss = model.compute_loss(proj_A, proj_B, proj_negatives, se_weights)
-                print(f"[Debug] Batch {i}: Loss value: {loss.item()}")
-
-            # Debugging: Check for NaN/Inf values
-            if torch.isnan(loss) or torch.isinf(loss):
-                print(f"[Debug] Batch {i}: Loss is NaN or Inf. Skipping this batch.")
-                continue
 
             scaler.scale(loss).backward()
             clip_grad_norm_(model.parameters(), max_norm=1.0)
             scaler.step(optimizer)
             scaler.update()
+
             running_loss += loss.item()
+            progress_bar.set_postfix(loss=running_loss / (progress_bar.n + 1))
 
-            # SRCC and PLCC for the batch
-            srocc, _ = stats.spearmanr(proj_A.detach().cpu().flatten(), proj_B.detach().cpu().flatten())
-            plcc, _ = stats.pearsonr(proj_A.detach().cpu().flatten(), proj_B.detach().cpu().flatten())
-            srocc_values.append(srocc)
-            plcc_values.append(plcc)
+        train_metrics["loss"].append(running_loss / len(train_dataloader))
 
-            progress_bar.set_postfix(loss=running_loss / (i + 1))
+        # Validation
+        val_srocc, val_plcc = validate(model, val_dataloader, device)
+        val_metrics["srcc"].append(val_srocc)
+        val_metrics["plcc"].append(val_plcc)
 
-        # Average SRCC and PLCC for the epoch
-        train_metrics['srcc'].append(np.mean(srocc_values))
-        train_metrics['plcc'].append(np.mean(plcc_values))
+        if val_srocc > best_srocc:
+            best_srocc = val_srocc
+            torch.save(model.state_dict(), f"best_model_epoch_{epoch + 1}.pth")
 
-        lr_scheduler.step()
+    print("Training complete. Best SRCC:", best_srocc)
 
-        # Validation metrics
-        avg_srocc_val, avg_plcc_val = validate(args, model, val_dataloader, device)
-        val_metrics['srcc'].append(avg_srocc_val)
-        val_metrics['plcc'].append(avg_plcc_val)
-
-        # Test metrics
-        avg_srocc_test, avg_plcc_test = validate(args, model, test_dataloader, device)
-        test_metrics['srcc'].append(avg_srocc_test)
-        test_metrics['plcc'].append(avg_plcc_test)
-
-        if avg_srocc_val > best_srocc:
-            best_srocc = avg_srocc_val
-            save_checkpoint(model, checkpoint_path, epoch, best_srocc)
-
-    print("Finished training")
-    return train_metrics, val_metrics, test_metrics
-
+    # 반환 값 추가
+    return train_metrics, val_metrics
 
 
 def test(args, model, test_dataloader, device):
@@ -220,6 +168,12 @@ def test(args, model, test_dataloader, device):
         for batch in test_dataloader:
             inputs_A = batch["img_A"].to(device)
             inputs_B = batch["img_B"].to(device)
+
+            # Flatten crops if needed (5D -> 4D)
+            if inputs_A.dim() == 5:
+                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
+            if inputs_B.dim() == 5:
+                inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
 
             proj_A, proj_B = model(inputs_A, inputs_B)
 
@@ -387,33 +341,51 @@ def debug_embeddings(embeddings, title="Embeddings"):
     plt.show()
 
 
-def evaluate_hard_negative_attention(model, dataloader, device):
-    model.eval()
-    metrics = {'with_attention': {'srcc': [], 'plcc': []}, 'without_attention': {'srcc': [], 'plcc': []}}
+def evaluate_zero_shot(model, unseen_dataset, device):
+    unseen_dataloader = DataLoader(unseen_dataset, batch_size=32, shuffle=False)
+    metrics = {'srcc': [], 'plcc': []}
 
-    with torch.no_grad():
-        for batch in dataloader:
-            inputs_A = batch["img_A"].to(device)
-            inputs_B = batch["img_B"].to(device)
+    for batch in unseen_dataloader:
+        inputs_A = batch["img_A"].to(device)
+        mos = batch["mos"].to(device)
+        
+        # 모델 출력 계산
+        proj_A = model(inputs_A)
 
-            proj_A_with, proj_B_with = model(inputs_A, inputs_B)
-            model.attention = None
-            proj_A_without, proj_B_without = model(inputs_A, inputs_B)
+        # proj_A가 튜플인지 확인
+        if isinstance(proj_A, tuple):
+            proj_A = proj_A[0]  # proj_A만 사용
 
-            srcc_with, _ = stats.spearmanr(proj_A_with.flatten().cpu().numpy(), proj_B_with.flatten().cpu().numpy())
-            plcc_with, _ = stats.pearsonr(proj_A_with.flatten().cpu().numpy(), proj_B_with.flatten().cpu().numpy())
+        # 크기 로그 출력
+        print(f"[Debug] mos size: {mos.shape}, proj_A size: {proj_A.shape}")
 
-            srcc_without, _ = stats.spearmanr(proj_A_without.flatten().cpu().numpy(), proj_B_without.flatten().cpu().numpy())
-            plcc_without, _ = stats.pearsonr(proj_A_without.flatten().cpu().numpy(), proj_B_without.flatten().cpu().numpy())
+        # proj_A 크기 조정
+        batch_size = mos.shape[0]
+        proj_A_mean = proj_A.view(batch_size, -1, proj_A.shape[-1]).mean(dim=1)
+        proj_A_final = proj_A_mean.mean(dim=1)  # 최종적으로 [batch_size] 형태로 축소
 
-            metrics['with_attention']['srcc'].append(srcc_with)
-            metrics['with_attention']['plcc'].append(plcc_with)
-            metrics['without_attention']['srcc'].append(srcc_without)
-            metrics['without_attention']['plcc'].append(plcc_without)
+        # 크기 맞춤 후 로그 출력
+        print(f"[Debug] proj_A_final size after adjustment: {proj_A_final.shape}")
 
-    print("\nHardNegativeCrossAttention Results:")
-    print(f"With Attention: SRCC = {np.mean(metrics['with_attention']['srcc']):.4f}, PLCC = {np.mean(metrics['with_attention']['plcc']):.4f}")
-    print(f"Without Attention: SRCC = {np.mean(metrics['without_attention']['srcc']):.4f}, PLCC = {np.mean(metrics['without_attention']['plcc']):.4f}")
+        # Positive Pair Verification 호출
+        verify_positive_pairs(
+            distortions_A="distortion_type_A",
+            distortions_B="distortion_type_B",
+            applied_distortions_A="applied_type_A",
+            applied_distortions_B="applied_type_B"
+        )
+
+        # detach()를 사용해 그래프에서 분리
+        mos_np = mos.cpu().detach().numpy()
+        proj_A_np = proj_A_final.cpu().detach().numpy()
+
+        # SRCC 및 PLCC 계산
+        srcc, _ = stats.spearmanr(mos_np, proj_A_np)
+        plcc, _ = stats.pearsonr(mos_np, proj_A_np)
+
+        metrics['srcc'].append(srcc)
+        metrics['plcc'].append(plcc)
+
     return metrics
 
 def test_hard_negative_attention(args, model, dataloader, device):
@@ -441,11 +413,9 @@ def test_hard_negative_attention(args, model, dataloader, device):
     return metrics
 
 
-
 if __name__ == "__main__":
     config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
     args = load_config(config_path)
-
 
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
     dataset_path = Path(args.data_base_path) / "kadid10k.csv"
@@ -475,8 +445,8 @@ if __name__ == "__main__":
         num_workers=min(args.training.num_workers, 16),
     )
 
-    # 모델, 옵티마이저, 스케줄러 초기화
-    model = SimCLR(encoder_params=DotMap(args.model.encoder), temperature=args.model.temperature).to(device)
+    # 모델 초기화에서 encoder_params 제거
+    model = SimCLR(embedding_dim=128, temperature=args.model.temperature).to(device)
     optimizer = torch.optim.SGD(
         model.parameters(),
         lr=args.training.learning_rate,
@@ -492,17 +462,17 @@ if __name__ == "__main__":
     scaler = torch.amp.GradScaler()
 
     # train 함수 호출
-    train_metrics, val_metrics, test_metrics = train(
+    train_metrics, val_metrics = train(
         args,
         model,
         train_dataloader,
         val_dataloader,
-        test_dataloader,
         optimizer,
         lr_scheduler,
         scaler,
         device
     )
+
 
     # Ridge Regressor 학습
     regressor = train_ridge_regressor(model, train_dataloader, device)
@@ -543,7 +513,7 @@ if __name__ == "__main__":
 
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
-    print("Test Metrics:", format_metrics(test_metrics))
+    #print("Test Metrics:", format_metrics(test_metrics))
 
 
     # KADID10K 데이터셋에서 테스트 수행
@@ -552,16 +522,17 @@ if __name__ == "__main__":
     # 테스트 결과 출력
     print("Train(KADID10K)")
     print(f"\nTest Results on KADID10K Dataset: SRCC = {test_results['srcc']:.4f}, PLCC = {test_results['plcc']:.4f}")
- """
-
-#Train(KADID10K)
-#Test Results on KADID10K Dataset: SRCC = 0.9172, PLCC = 0.9213
 
 
+# Training Metrics: {'srcc': [0.9418], 'plcc': [0.9446]}
+# Validation Metrics: {'srcc': [0.9456], 'plcc': [0.948]}
+# Test Metrics: {'srcc': [0.9421], 'plcc': [0.9444]}
+
+# Test Results on KADID10K Dataset: SRCC = 0.9419, PLCC = 0.9441
 
 
 # TID2013
-"""  
+""" 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -1110,13 +1081,13 @@ if __name__ == "__main__":
     # 테스트 결과 출력
     print("Train(TID2013)")
     print(f"\nTest Results on TID2013 Dataset: SRCC = {test_results['srcc']:.4f}, PLCC = {test_results['plcc']:.4f}")
+ """
 
-  """
 
 # Training Metrics: {'srcc': [0.9292, 0.9295, 0.93, 0.9291, 0.9296, 0.9294, 0.9291, 0.9277, 0.9294, 0.9297], 'plcc': [0.9332, 0.9334, 0.9339, 0.9331, 0.9336, 0.9332, 0.9331, 0.9317, 0.9334, 0.9337]}
 # Validation Metrics: {'srcc': [0.9117, 0.911, 0.911, 0.9125, 0.9151, 0.9025, 0.9104, 0.914, 0.9118, 0.9108], 'plcc': [0.9171, 0.9156, 0.9165, 0.9188, 0.9205, 0.9081, 0.9162, 0.919, 0.9168, 0.9165]}
 # Test Metrics: {'srcc': [0.9242, 0.924, 0.9254, 0.9223, 0.9253, 0.9196, 0.9223, 0.9253, 0.925, 0.9201], 'plcc': [0.9294, 0.9284, 0.9304, 0.9275, 0.9301, 0.9245, 0.9275, 0.9299, 0.9299, 0.925]}
-# Test Results on TID@013 Dataset: SRCC = 0.9117, PLCC = 0.9187
+# Test Results on TID2013 Dataset: SRCC = 0.9117, PLCC = 0.9187
 
 
 # SPAQ
@@ -2225,11 +2196,13 @@ if __name__ == "__main__":
     # 테스트 결과 출력
     print("Train(CSIQ)")
     print(f"\nTest Results on CSIQ Dataset: SRCC = {test_results['srcc']:.4f}, PLCC = {test_results['plcc']:.4f}")
-     """
 
+ """
     # Test Results on CSIQ Dataset: SRCC = 0.8789, PLCC = 0.8859
 
-
+#Training Metrics: {'srcc': [0.9043, 0.9011, 0.9005, 0.9009, 0.9026, 0.901, 0.8989, 0.9002, 0.9046, 0.9023], 'plcc': [0.9132, 0.9107, 0.9099, 0.9107, 0.9115, 0.9101, 0.9083, 0.9093, 0.9135, 0.9111]}
+#Validation Metrics: {'srcc': [0.9057, 0.8835, 0.911, 0.903, 0.9036, 0.9065, 0.8965, 0.8951, 0.9019, 0.9045], 'plcc': [0.9132, 0.8936, 0.9179, 0.91, 0.9123, 0.9145, 0.9066, 0.9045, 0.9089, 0.9109]}
+#Test Metrics: {'srcc': [0.8814, 0.8766, 0.8869, 0.8862, 0.88, 0.8807, 0.8778, 0.8812, 0.8791, 0.893], 'plcc': [0.8907, 0.8876, 0.8959, 0.8941, 0.8886, 0.8901, 0.89, 0.8917, 0.8881, 0.9012]}
 #-------------------
 
 
@@ -4455,7 +4428,7 @@ if __name__ == "__main__":
 
 
 # Train(SPAQ) & Test(CSIQ)
-
+""" 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -4666,6 +4639,13 @@ if __name__ == "__main__":
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
 
+ """
+# Train(SPAQ) & Test(CSIQ)
+# 
+# Test Results on CSIQ Dataset: SRCC = 0.8608, PLCC = 0.8667
+# 
+# Training Metrics: {'loss': [0.3044, 0.2918, 0.2912, 0.2684, 0.2586, 0.2476, 0.2387, 0.2311, 0.2184, 0.199], 'srcc': [0.8674, 0.8703, 0.866, 0.8682, 0.8695, 0.8721, 0.8713, 0.8696, 0.8673, 0.8688], 'plcc': [0.8714, 0.8743, 0.87, 0.8722, 0.8733, 0.8757, 0.8751, 0.8734, 0.8708, 0.8723]}
+# Validation Metrics: {'srcc': [0.8504, 0.8576, 0.8562, 0.8717, 0.877, 0.8719, 0.8737, 0.8593, 0.8667, 0.8529], 'plcc': [0.8528, 0.8599, 0.8593, 0.8736, 0.8785, 0.8747, 0.875, 0.8626, 0.8697, 0.8553]}
 
 
 # Train(TID2013) & Test(SPAQ)
@@ -5157,12 +5137,23 @@ from models.simclr import SimCLR
 from utils.utils import parse_config
 from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
 import matplotlib.pyplot as plt
+import random
+from typing import Tuple
+import argparse
 import yaml
+from sklearn.model_selection import GridSearchCV
+import torch
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
-import cv2
+from tqdm import tqdm
+from pathlib import Path
+import random
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+import cv2  # Grad-CAM 시각화에 필요
 
-# Config loader
+# Config 로더
 def load_config(config_path: str) -> DotMap:
     with open(config_path, 'r') as file:
         config = yaml.safe_load(file)
@@ -5171,104 +5162,6 @@ def load_config(config_path: str) -> DotMap:
 def save_checkpoint(model: nn.Module, checkpoint_path: Path, epoch: int, srocc: float) -> None:
     filename = f"epoch_{epoch}_srocc_{srocc:.3f}.pth"
     torch.save(model.state_dict(), checkpoint_path / filename)
-
-class GradCAM:
-    def __init__(self, model, target_layer_name):
-        self.model = model
-        self.target_layer_name = target_layer_name
-        self.gradients = None
-        self.activations = None
-        self.hook_layers()
-
-    def hook_layers(self):
-        def forward_hook(module, input, output):
-            self.activations = output
-
-        def backward_hook(module, grad_input, grad_output):
-            self.gradients = grad_output[0]
-
-        for name, module in self.model.named_modules():
-            if name == self.target_layer_name:
-                module.register_forward_hook(forward_hook)
-                module.register_backward_hook(backward_hook)
-
-    def generate(self, input_tensor, class_idx=None):
-        self.model.eval()
-        output = self.model(input_tensor)
-
-        # Grad-CAM을 위한 class index 설정
-        if class_idx is None:
-            class_idx = output.argmax(dim=1)[0].item()  # 첫 번째 배치 기준으로 index 추출
-
-        self.model.zero_grad()
-        target = output[:, class_idx].sum()  # 스칼라 값으로 변환
-        target.backward(retain_graph=True)
-
-        gradients = self.gradients.detach().cpu().numpy()
-        activations = self.activations.detach().cpu().numpy()
-
-        weights = np.mean(gradients, axis=(2, 3))
-        cam = np.sum(weights[:, :, None, None] * activations, axis=1)
-        cam = np.maximum(cam, 0)
-        cam = cam[0]
-        cam = (cam - cam.min()) / (cam.max() - cam.min())
-        return cam
-
-
-
-    def overlay_cam(self, img, cam, alpha=0.5):
-        cam_resized = cv2.resize(cam, (img.shape[1], img.shape[0]))
-        heatmap = cv2.applyColorMap(np.uint8(255 * cam_resized), cv2.COLORMAP_JET)
-        overlay = cv2.addWeighted(img, alpha, heatmap, 1 - alpha, 0)
-        return overlay
-
-def visualize_gradcam(args, model, dataloader, device):
-    grad_cam = GradCAM(model, target_layer_name="backbone.layer4")
-
-    for batch in dataloader:
-        inputs = batch["img_A"].to(device)
-        inputs = inputs[:2]  # 첫 번째 이미지만 선택
-
-        # 입력 텐서 차원 변환
-        if inputs.dim() == 5:  # [batch_size, num_crops, C, H, W]
-            inputs = inputs.view(-1, *inputs.shape[2:])  # [batch_size * num_crops, C, H, W]
-
-        # Grad-CAM 생성
-        cam = grad_cam.generate(inputs)
-
-        # 첫 번째 이미지 선택 및 정규화
-        img = inputs[0].permute(1, 2, 0).cpu().numpy()  # [H, W, C]
-        img = (img - img.min()) / (img.max() - img.min())  # [0, 1]로 정규화
-        img = (img * 255).astype(np.uint8)  # [0, 255] 범위로 변환
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # OpenCV 형식으로 변환
-
-        # Grad-CAM 히트맵 생성
-        cam_resized = cv2.resize(cam, (img.shape[1], img.shape[0]))  # 원본 이미지 크기로 리사이즈
-        heatmap = cv2.applyColorMap(np.uint8(255 * cam_resized), cv2.COLORMAP_JET)  # 히트맵 생성
-        overlay = cv2.addWeighted(img, 0.5, heatmap, 0.5, 0)  # 히트맵과 원본 이미지 오버레이
-
-        # 시각화
-        plt.figure(figsize=(10, 5))
-        plt.subplot(1, 3, 1)
-        plt.title("Original Image")
-        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        plt.axis("off")
-
-        plt.subplot(1, 3, 2)
-        plt.title("Grad-CAM Heatmap")
-        plt.imshow(cam, cmap="jet")
-        plt.axis("off")
-
-        plt.subplot(1, 3, 3)
-        plt.title("Overlay Image")
-        plt.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
-        plt.axis("off")
-
-        plt.show()
-        break
-
-
-
 
 def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, scaler, device):
     checkpoint_path = Path(str(args.checkpoint_base_path))
@@ -5301,6 +5194,7 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
             print(f"[Debug] Batch {i}: Hard negatives shape: {hard_negatives.shape}")
 
             hard_negatives = hard_negatives.view(-1, *hard_negatives.shape[2:])
+            #verify_hard_negatives(inputs_B.shape, hard_negatives.shape)
 
             # Process hard negatives through backbone and projector
             print(f"[Debug] Batch {i}: Processing hard negatives through backbone...")
@@ -5373,7 +5267,6 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
     return train_metrics, val_metrics, test_metrics
 
 
-
 def validate(args, model, dataloader, device):
     model.eval()
     srocc_values, plcc_values = [], []
@@ -5382,11 +5275,19 @@ def validate(args, model, dataloader, device):
         for batch in dataloader:
             inputs_A = batch["img_A"].to(device)
             inputs_B = batch["img_B"].to(device)
+
+            # Flatten crops if needed
+            if inputs_A.dim() == 5:
+                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
+                inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
+
             proj_A, proj_B = model(inputs_A, inputs_B)
 
-            proj_A = F.normalize(proj_A, dim=1).cpu().numpy()
-            proj_B = F.normalize(proj_B, dim=1).cpu().numpy()
+            # Normalize projections for SRCC/PLCC calculation
+            proj_A = F.normalize(proj_A, dim=1).detach().cpu().numpy()
+            proj_B = F.normalize(proj_B, dim=1).detach().cpu().numpy()
 
+            # Calculate SRCC and PLCC
             srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
             plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
 
@@ -5395,7 +5296,153 @@ def validate(args, model, dataloader, device):
 
     avg_srocc = np.mean(srocc_values)
     avg_plcc = np.mean(plcc_values)
+
     return avg_srocc, avg_plcc
+
+
+## Grad-CAM 구현
+# class GradCam:
+#    def __init__(self, model, target_layer):
+#        self.model = model
+#        self.target_layer = target_layer
+#        self.gradients = None
+#
+#        # Hook 설정
+#        self.hook_layers()
+#
+#    def hook_layers(self):
+#        def forward_hook(module, input, output):
+#            self.feature_maps = output
+#
+#        def backward_hook(module, grad_in, grad_out):
+#            self.gradients = grad_out[0]
+#
+#        self.target_layer.register_forward_hook(forward_hook)
+#        self.target_layer.register_backward_hook(backward_hook)
+#
+#    def generate_heatmap(self, input_tensor):
+#        # Forward 패스
+#        output = self.model(input_tensor)
+#
+#        # Grad-CAM은 임베딩 벡터의 특정 차원에 대해 수행 (예: 평균 사용)
+#        class_score = output.mean(dim=1)  # 임베딩 평균 점수 사용
+#        class_score.backward(torch.ones_like(class_score))  # 역전파를 위한 더미 그래디언트
+#
+#        # Grad-CAM 생성
+#        weights = self.gradients.mean(dim=(2, 3), keepdim=True)
+#        cam = torch.sum(weights * self.feature_maps, dim=1).squeeze(0).cpu().detach().numpy()
+#        cam = np.maximum(cam, 0)  # ReLU
+#        cam = cam / cam.max()  # 정규화
+#
+#        return cam
+#
+#    def overlay_heatmap(self, cam, image):
+#        # Grad-CAM을 OpenCV에서 사용할 수 있는 형식으로 변환
+#        cam_resized = cv2.resize(cam, (image.shape[1], image.shape[0]))
+#        cam_resized = np.clip(cam_resized, 0, 1)  # [0, 1] 범위로 클리핑
+#        cam_resized = np.uint8(255 * cam_resized)  # [0, 255] 범위로 변환 및 uint8 타입 변환
+#
+#        # OpenCV의 ColorMap 적용
+#        heatmap = cv2.applyColorMap(cam_resized, cv2.COLORMAP_JET)
+#
+#        # 원본 이미지가 3채널인지 확인 및 변환
+#        if image.ndim == 2:  # 흑백 이미지인 경우
+#            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+#
+#        # Grad-CAM 히트맵과 원본 이미지 오버레이
+#        overlay = cv2.addWeighted(image, 0.6, heatmap, 0.4, 0)
+#        return overlay
+#
+#
+#
+
+class GradCam:
+    def __init__(self, model, target_layer):
+        self.model = model
+        self.target_layer = target_layer
+        self.gradients = None
+
+        # Hook 설정
+        self.hook_layers()
+
+    def hook_layers(self):
+        def forward_hook(module, input, output):
+            self.feature_maps = output
+
+        def backward_hook(module, grad_in, grad_out):
+            self.gradients = grad_out[0]
+
+        self.target_layer.register_forward_hook(forward_hook)
+        self.target_layer.register_backward_hook(backward_hook)
+
+    def generate_heatmap(self, input_tensor):
+        # Forward 패스
+        output = self.model(input_tensor)
+
+        # Grad-CAM은 임베딩 벡터의 특정 차원에 대해 수행 (예: 평균 사용)
+        class_score = output.mean(dim=1)  # 임베딩 평균 점수 사용
+        class_score.backward(torch.ones_like(class_score))  # 역전파를 위한 더미 그래디언트
+
+        # Grad-CAM 생성
+        weights = self.gradients.mean(dim=(2, 3), keepdim=True)
+        cam = torch.sum(weights * self.feature_maps, dim=1).squeeze(0).cpu().detach().numpy()
+        cam = np.maximum(cam, 0)  # ReLU
+        cam = cam / cam.max()  # 정규화
+
+        return cam
+
+    def overlay_heatmap(self, cam, image):
+        # Grad-CAM을 OpenCV에서 사용할 수 있는 형식으로 변환
+        cam_resized = cv2.resize(cam, (image.shape[1], image.shape[0]))  # [H, W]로 크기 조정
+        cam_resized = np.uint8(255 * cam_resized / cam_resized.max())  # [0, 255] 범위로 변환 및 uint8 타입 변환
+
+        # OpenCV의 ColorMap 적용
+        heatmap = cv2.applyColorMap(cam_resized, cv2.COLORMAP_JET)  # 컬러맵 생성
+
+        # 원본 이미지 정규화
+        image_normalized = (image - image.min()) / (image.max() - image.min())  # [0, 1]로 정규화
+        image_normalized = np.uint8(255 * image_normalized)  # [0, 255]로 변환
+
+        # 원본 이미지와 Grad-CAM 히트맵 오버레이
+        overlay = cv2.addWeighted(image_normalized, 0.6, heatmap, 0.4, 0)
+        return overlay
+
+
+# Grad-CAM 시각화
+def visualize_gradcam(model, dataloader, device, attention_layer):
+    gradcam = GradCam(model, attention_layer)  # Attention 계층 설정
+    for batch in dataloader:
+        inputs_A = batch["img_A"].to(device)
+
+        # 입력 데이터 차원 확인 및 변환
+        if inputs_A.dim() == 5:  # [batch_size, num_crops, C, H, W]
+            inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # [batch_size * num_crops, C, H, W]
+
+        # Grad-CAM 생성
+        cam = gradcam.generate_heatmap(inputs_A)
+
+        # 첫 번째 이미지를 시각화
+        input_image = inputs_A[0].permute(1, 2, 0).cpu().numpy()  # [H, W, C]
+        input_image = (input_image - input_image.min()) / (input_image.max() - input_image.min())  # 정규화
+        input_image = np.uint8(255 * input_image)  # [0, 255] 범위로 변환 및 uint8 타입 변환
+
+        overlay = gradcam.overlay_heatmap(cam, input_image)
+
+        plt.figure(figsize=(12, 6))
+        plt.subplot(1, 2, 1)
+        plt.title("Original Image")
+        plt.imshow(cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB))  # BGR -> RGB 변환
+        plt.axis("off")
+
+        plt.subplot(1, 2, 2)
+        plt.title("Grad-CAM Heatmap")
+        plt.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))  # BGR -> RGB 변환
+        plt.axis("off")
+
+        plt.show()
+        break
+
+
 
 if __name__ == "__main__":
     config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
@@ -5410,20 +5457,53 @@ if __name__ == "__main__":
     test_size = len(dataset) - train_size - val_size
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
 
-    train_dataloader = DataLoader(train_dataset, batch_size=args.training.batch_size, shuffle=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=args.training.batch_size, shuffle=False)
-    test_dataloader = DataLoader(test_dataset, batch_size=args.training.batch_size, shuffle=False)
-
-    model = SimCLR(encoder_params=DotMap(args.model.encoder), temperature=args.model.temperature).to(device)
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.training.learning_rate, momentum=args.training.optimizer.momentum)
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10)
-    scaler = torch.cuda.amp.GradScaler()
-
-    # train 함수에 test_dataloader 추가
-    train_metrics, val_metrics, test_metrics = train(
-        args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, scaler, device
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=args.training.batch_size,
+        shuffle=True,
+        num_workers=min(args.training.num_workers, 16),
+    )
+    val_dataloader = DataLoader(
+        val_dataset,
+        batch_size=args.training.batch_size,
+        shuffle=False,
+        num_workers=min(args.training.num_workers, 16),
+    )
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=args.training.batch_size,
+        shuffle=False,
+        num_workers=min(args.training.num_workers, 16),
     )
 
-    # Grad-CAM 시각화
-    visualize_gradcam(args, model, val_dataloader, device)
- """
+    model = SimCLR(encoder_params=DotMap(args.model.encoder), temperature=args.model.temperature).to(device)
+    optimizer = torch.optim.SGD(
+        model.parameters(),
+        lr=args.training.learning_rate,
+        momentum=args.training.optimizer.momentum,
+        weight_decay=args.training.optimizer.weight_decay,
+    )
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=args.training.lr_scheduler.T_0,
+        T_mult=args.training.lr_scheduler.T_mult,
+        eta_min=args.training.lr_scheduler.eta_min,
+    )
+    scaler = torch.amp.GradScaler()
+
+    train_metrics, val_metrics, test_metrics = train(
+        args,
+        model,
+        train_dataloader,
+        val_dataloader,
+        test_dataloader,
+        optimizer,
+        lr_scheduler,
+        scaler,
+        device
+    )
+
+    attention_layer = model.attention  # DistortionAttention 계층 지정
+    print("\nVisualizing Grad-CAM...")
+    visualize_gradcam(model, test_dataloader, device, attention_layer)
+"""

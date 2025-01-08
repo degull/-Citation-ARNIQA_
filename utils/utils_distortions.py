@@ -363,23 +363,37 @@ def apply_random_distortions(images, shared_distortion=None, return_info=False):
 
 
 
+""" 
+def generate_hard_negatives(inputs, scale_factor=0.5):
+    # 5D 입력을 4D로 변환
+    if inputs.dim() == 5:
+        batch_size, num_crops, channels, height, width = inputs.size()
+        inputs = inputs.view(-1, channels, height, width)  # Flatten crops
 
-def generate_hard_negatives(img, scale_factor=0.5):
-    # Ensure img is 5D
-    if img.dim() == 4:  # [batch_size, C, H, W]
-        img = img.unsqueeze(1)  # Convert to [batch_size, 1, C, H, W]
+    # 4D 입력 크기 가져오기
+    batch_size, channels, height, width = inputs.size()
+    new_height, new_width = int(height * scale_factor), int(width * scale_factor)
 
-    batch_size, num_crops, C, H, W = img.size()
-    downscaled_size = (int(H * scale_factor), int(W * scale_factor))
-
-    # Downscale each crop
-    hard_negatives = torch.zeros(batch_size, num_crops, C, *downscaled_size, device=img.device)
-    for i in range(num_crops):
-        hard_negatives[:, i] = F.interpolate(img[:, i], size=downscaled_size, mode='bilinear', align_corners=False)
-
+    # 크기 조정
+    hard_negatives = F.interpolate(inputs, size=(new_height, new_width), mode='bilinear', align_corners=False)
     return hard_negatives
+ """
 
-
+def generate_hard_negatives(inputs, scale_factor=0.5):
+    # 5D 입력을 처리하여 4D로 변환
+    if inputs.dim() == 5:
+        batch_size, num_crops, channels, height, width = inputs.size()
+        inputs = inputs.view(-1, channels, height, width)  # Flatten crops
+    
+    # 4D 입력 크기 확인
+    batch_size, channels, height, width = inputs.size()
+    new_height, new_width = int(height * scale_factor), int(width * scale_factor)
+    
+    # 크기 조정
+    hard_negatives = F.interpolate(inputs, size=(new_height, new_width), mode='bilinear', align_corners=False)
+    print(f"[Debug] hard_negatives shape: {hard_negatives.shape}")
+    
+    return hard_negatives
 
 
 def imscatter(img: torch.Tensor, amount: float = 0.05, iterations: int = 1) -> torch.Tensor:
