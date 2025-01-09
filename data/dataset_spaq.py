@@ -11,31 +11,31 @@ import io
 
 # 왜곡 유형 매핑
 distortion_types_mapping = {
-    1: "gaussian_blur",
-    2: "lens_blur",
-    3: "motion_blur",
-    4: "color_diffusion",
-    5: "color_shift",
-    6: "color_quantization",
-    7: "color_saturation_1",
-    8: "color_saturation_2",
-    9: "jpeg2000",
-    10: "jpeg",
-    11: "white_noise",
-    12: "white_noise_color_component",
-    13: "impulse_noise",
-    14: "multiplicative_noise",
-    15: "denoise",
-    16: "brighten",
-    17: "darken",
-    18: "mean_shift",
-    19: "jitter",
-    20: "non_eccentricity_patch",
-    21: "pixelate",
-    22: "quantization",
-    23: "color_block",
-    24: "high_sharpen",
-    25: "contrast_change"
+    1: "gaussian_blur", #sobel o
+    2: "lens_blur", #sobel o
+    3: "motion_blur",   #sobel o
+    4: "color_diffusion",   #sobel o
+    5: "color_shift",   #sobel o
+    6: "color_quantization",    #sobel o
+    7: "color_saturation_1",    #HSV 색공간 분석
+    8: "color_saturation_2",    #HSV 색공간 분석
+    9: "jpeg2000",  #sobel o
+    10: "jpeg", #sobel o
+    11: "white_noise",  #sobel o
+    12: "white_noise_color_component",  #sobel o
+    13: "impulse_noise",    #sobel o
+    14: "multiplicative_noise", #sobel o
+    15: "denoise",  #Fourier Transform 
+    16: "brighten", #HSV 색공간 분석
+    17: "darken",   #HSV 색공간 분석
+    18: "mean_shift",   #히스토그램 분석
+    19: "jitter",   # Fourier Transform
+    20: "non_eccentricity_patch",   #sobel o
+    21: "pixelate", #sobel o
+    22: "quantization", #Fourier Transform
+    23: "color_block",  #Fourier Transform
+    24: "high_sharpen", #Fourier Transform
+    25: "contrast_change"   #Fourier Transform
 }
 
 # 강도 레벨 정의

@@ -380,20 +380,26 @@ def generate_hard_negatives(inputs, scale_factor=0.5):
  """
 
 def generate_hard_negatives(inputs, scale_factor=0.5):
-    # 5D 입력을 처리하여 4D로 변환
+    # 5D 입력 처리
     if inputs.dim() == 5:
         batch_size, num_crops, channels, height, width = inputs.size()
         inputs = inputs.view(-1, channels, height, width)  # Flatten crops
-    
+
     # 4D 입력 크기 확인
     batch_size, channels, height, width = inputs.size()
     new_height, new_width = int(height * scale_factor), int(width * scale_factor)
-    
+
     # 크기 조정
     hard_negatives = F.interpolate(inputs, size=(new_height, new_width), mode='bilinear', align_corners=False)
-    print(f"[Debug] hard_negatives shape: {hard_negatives.shape}")
-    
+
+    # 채널 크기 조정
+    if hard_negatives.size(1) != 3:  # ResNet 입력 조건: 3채널
+        hard_negatives = hard_negatives.mean(dim=1, keepdim=True).repeat(1, 3, 1, 1)
+        print(f"[Debug] Adjusted hard_negatives shape: {hard_negatives.shape}")
+
     return hard_negatives
+
+
 
 
 def imscatter(img: torch.Tensor, amount: float = 0.05, iterations: int = 1) -> torch.Tensor:

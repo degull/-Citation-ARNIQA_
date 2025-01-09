@@ -55,7 +55,7 @@ class ResNetSE(nn.Module):
      """
 
 # ver2
-""" 
+
 import torch
 import torch.nn as nn
 from torchvision.models import resnet50
@@ -146,7 +146,7 @@ class ResNetSE(nn.Module):
 
 # 각 레이어 뒤에 SEBlock을 추가하여 채널별 중요도 학습을 강화
 # 기존 ResNet보다 채널별 중요도를 더 잘 반영 """
-
+""" 
 import torch
 import torch.nn as nn
 from torchvision.models import resnet50
@@ -191,3 +191,4 @@ class ResNetSE(nn.Module):
         x = self.layer4(x)
         x = self.se4(x)
         return x
+ """
