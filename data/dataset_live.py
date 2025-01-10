@@ -1,83 +1,60 @@
-from pathlib import Path
 import pandas as pd
 import numpy as np
+from PIL import Image, ImageFilter, ImageEnhance
+import torch
+from torch.utils.data import Dataset
+from torchvision import transforms
+import os
+import random
 
-from data.dataset_synthetic_base_iqa import SyntheticIQADataset
+# LIVE Dataset
+class LIVEDataset(Dataset):
+    def __init__(self, root: str, crop_size: int = 224):
+        super().__init__()
+        self.root = root
+        self.crop_size = crop_size
 
+        # CSV 파일 확인 및 로드
+        csv_path = os.path.join(self.root, "LIVE_Challenge.txt")
+        if not os.path.isfile(csv_path):
+            raise FileNotFoundError(f"LIVE_Challenge.txt 파일이 {csv_path} 경로에 존재하지 않습니다.")
 
-class LIVEDataset(SyntheticIQADataset):
-    """
-    LIVE IQA dataset with DMOS in range [1, 100].
+        # CSV 데이터 로드
+        scores_csv = pd.read_csv(csv_path, sep=",")
+        self.image_paths = [os.path.join(self.root, path.replace("LIVE_Challenge/", "")) for path in scores_csv["dis_img_path"].values]
+        self.mos = scores_csv["score"].values
 
-    Args:
-        root (string): root directory of the dataset
-        phase (string): indicates the phase of the dataset. Value must be in ['train', 'test', 'val', 'all']. Default is 'train'.
-        split_idx (int): index of the split to use between [0, 9]. Used only if phase != 'all'. Default is 0.
-        crop_size (int): size of each crop. Default is 224.
+    def transform(self, image: Image) -> torch.Tensor:
+        return transforms.Compose([
+            transforms.Resize((self.crop_size, self.crop_size)),
+            transforms.ToTensor(),
+        ])(image)
 
-    Returns:
-        dictionary with keys:
-            img (Tensor): image
-            mos (float): differential mean opinion score of the image (in range [1, 100])
-            dist_type (string): type of distortion
-            dist_group (string): distortion group which contains the distortion type
-            dist_level (int): level of distortion
-    """
-    def __init__(self,
-                 root: str,
-                 phase: str = "train",
-                 split_idx: int = 0,
-                 crop_size: int = 224):
-        mos_type = "dmos"
-        mos_range = (1, 100)
-        is_synthetic = True
-        super().__init__(root, mos_type=mos_type, mos_range=mos_range, is_synthetic=is_synthetic, phase=phase, split_idx=split_idx, crop_size=crop_size)
-        scores_csv = pd.read_csv(self.root / "LIVE.txt", sep=",")
+    def __getitem__(self, index: int):
+        try:
+            img_path = self.image_paths[index]
+            img = Image.open(img_path).convert("RGB")
+        except Exception as e:
+            print(f"[Error] Loading image: {img_path}: {e}")
+            return None
 
-        self.images = scores_csv["dis_img_path"].values.tolist()
-        self.images = [Path(el) for el in self.images]
-        self.images = np.array([self.root / el.relative_to(el.parts[0]) for el in self.images])
+        # Transform 이미지
+        img_transformed = self.transform(img)
 
-        self.ref_images = scores_csv["ref_img_path"].values.tolist()
-        self.ref_images = [Path(el) for el in self.ref_images]
-        self.ref_images = np.array([self.root / el.relative_to(el.parts[0]) for el in self.ref_images])
+        return {
+            "img": img_transformed,
+            "mos": torch.tensor(self.mos[index], dtype=torch.float32),
+        }
 
-        self.mos = np.array(scores_csv["score"].values.tolist())
+    def __len__(self):
+        return len(self.image_paths)
 
-        self.distortion_types = scores_csv["dis_type"].values.tolist()
-        self.distortion_types = np.array([distortion_types_mapping[el] for el in self.distortion_types])
-        self.distortion_groups = np.array([available_distortions[el] for el in self.distortion_types])
-        self.distortion_levels = np.array([5] * len(self.distortion_types))
+# Example Usage
+if __name__ == "__main__":
+    dataset = LIVEDataset(root="E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE")
+    print(f"Dataset size: {len(dataset)}")
 
-        if self.phase != "all":
-            split_idxs = np.load(self.root / "splits" / f"{self.phase}.npy")[self.split_idx]
-            split_idxs = np.array(list(filter(lambda x: x != -1, split_idxs)))  # Remove the padding (i.e. -1 indexes)
-            self.images = self.images[split_idxs]
-            self.ref_images = self.ref_images[split_idxs]
-            self.mos = self.mos[split_idxs]
-            self.distortion_types = self.distortion_types[split_idxs]
-            self.distortion_groups = self.distortion_groups[split_idxs]
-            self.distortion_levels = self.distortion_levels[split_idxs]
-
-
-distortion_types_mapping = {
-    "jp2k": "jpeg2000",
-    "jpeg": "jpeg",
-    "wn": "white_noise",
-    "gblur": "gaussian_blur",
-    "fastfading": "fast_fading",
-}
-
-available_distortions = {
-    "white_noise": "noise",
-    "gaussian_blur": "blur",
-    "jpeg2000": "jpeg",
-    "jpeg": "jpeg",
-    "fast_fading": "jpeg",
-}
-
-distortion_groups = {
-    "noise": ["white_noise"],
-    "blur": ["gaussian_blur"],
-    "jpeg": ["jpeg2000", "jpeg", "fast_fading"],
-}
+    sample = dataset[0]
+    if sample is not None:
+        print(f"Sample Image Shape: {sample['img'].shape}")
+        print(f"MOS Score: {sample['mos']}")

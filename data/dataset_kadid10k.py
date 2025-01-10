@@ -301,6 +301,7 @@ class KADID10KDataset(Dataset):
         ]
 
 
+
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
             transforms.Resize((self.crop_size, self.crop_size)),
