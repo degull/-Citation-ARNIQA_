@@ -94,6 +94,7 @@ class SimCLR(nn.Module):
 
     def forward(self, inputs_A, inputs_B=None):
         inputs_A = self.backbone(inputs_A)
+        print("[Debug] Backbone Output Shape (inputs_A):", inputs_A.shape)
         proj_A = self.projector(inputs_A.mean([2, 3]))
 
         if inputs_B is not None:

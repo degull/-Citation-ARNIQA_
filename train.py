@@ -1,5 +1,5 @@
 # KADID
-"""  
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -88,6 +88,8 @@ def validate(args, model, dataloader, device):
                 inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
 
             proj_A, proj_B = model(inputs_A, inputs_B)
+            print("[Debug] proj_A shape:", proj_A.shape)
+            print("[Debug] proj_B shape:", proj_B.shape)
 
             proj_A = F.normalize(proj_A, dim=1).cpu().numpy()
             proj_B = F.normalize(proj_B, dim=1).cpu().numpy()
@@ -482,7 +484,7 @@ if __name__ == "__main__":
     print("Validation Metrics:", val_metrics)
     print("Test Metrics:", test_metrics)
 
- """
+
 
 # Training Metrics: {'loss': [0.977246010894174, 0.9814919378306415, 0.9717696172160071, 0.9651085283305194, 0.9457666422869708, 0.9572058212649714, 0.9260210964056823, 0.909191359002311, 0.897196088019792, 0.9037449225649103]}
 # Validation Metrics: {'srcc': [0.9369065630207829, 0.937873245873134, 0.9380598100004831, 0.9347579676961171, 0.9379627639713481, 0.9376647839565854, 0.9356669019033947, 0.9331197464952032, 0.9356527854637128, 0.9332537216736471], 'plcc': [0.9414624740006772, 0.9429755566820393, 0.9430955812066407, 0.9399344131086256, 0.942561365741839, 0.9427084106692083, 0.9413439375917318, 0.9384612448100849, 0.9409808185171208, 0.9382733897716338]}
@@ -4617,7 +4619,7 @@ if __name__ == "__main__":
 # Validation Metrics: {'srcc': [0.9225, 0.9185, 0.9169, 0.9156, 0.9208, 0.9162, 0.9157, 0.9231, 0.921, 0.9218], 'plcc': [0.9285, 0.925, 0.9236, 0.922, 0.9266, 0.923, 0.9229, 0.9293, 0.9277, 0.9276]}
 
 # Train(SPAQ) & Test(CSIQ)
-import torch
+""" import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -4849,14 +4851,15 @@ if __name__ == "__main__":
         return {key: [round(value, 4) for value in values] for key, values in metrics.items()}
 
     print("\nTraining Metrics:", format_metrics(train_metrics))
-    print("Validation Metrics:", format_metrics(val_metrics))
+    print("Validation Metrics:", format_metrics(val_metrics)) """
+
 
 # Train(SPAQ) & Test(CSIQ)
+# Test Results on CSIQ Dataset: SRCC = 0.9170, PLCC = 0.9225
 # 
-# Test Results on CSIQ Dataset: SRCC = 0.8608, PLCC = 0.8667
-# 
-# Training Metrics: {'loss': [0.3044, 0.2918, 0.2912, 0.2684, 0.2586, 0.2476, 0.2387, 0.2311, 0.2184, 0.199], 'srcc': [0.8674, 0.8703, 0.866, 0.8682, 0.8695, 0.8721, 0.8713, 0.8696, 0.8673, 0.8688], 'plcc': [0.8714, 0.8743, 0.87, 0.8722, 0.8733, 0.8757, 0.8751, 0.8734, 0.8708, 0.8723]}
-# Validation Metrics: {'srcc': [0.8504, 0.8576, 0.8562, 0.8717, 0.877, 0.8719, 0.8737, 0.8593, 0.8667, 0.8529], 'plcc': [0.8528, 0.8599, 0.8593, 0.8736, 0.8785, 0.8747, 0.875, 0.8626, 0.8697, 0.8553]}
+# Training Metrics: {'loss': [1.4105, 1.3714, 1.3723, 1.3916, 1.3368, 1.3665, 1.3561, 1.3336, 1.3587, 1.3679]}
+# Validation Metrics: {'srcc': [0.9299, 0.9302, 0.9282, 0.9287, 0.9326, 0.9272, 0.9279, 0.9316, 0.9329, 0.9231], 'plcc': [0.9337, 0.9344, 0.932, 0.9328, 0.9366, 0.9314, 0.9328, 0.935, 0.9367, 0.9272]}
+
 
 
 # Train(TID2013) & Test(SPAQ)
@@ -5081,7 +5084,7 @@ if __name__ == "__main__":
 
 
 # Train(KADID) & Test(LIVE)
-import torch
+""" import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -5255,7 +5258,7 @@ if __name__ == "__main__":
 
     # 데이터셋 경로 설정
     kadid_dataset_path = Path("E:/ARNIQA - SE - mix/ARNIQA/dataset/KADID10K/kadid10k.csv")
-    live_dataset_path = Path("E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE/LIVE_Challenge.txt")
+    live_dataset_path = Path("E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE")
     
 
     # 데이터셋 로드
@@ -5314,7 +5317,7 @@ if __name__ == "__main__":
     print("\nTraining Metrics:", format_metrics(train_metrics))
     print("Validation Metrics:", format_metrics(val_metrics))
 
-
+ """
 # Regressor 추출 코드 (KADID)
 """ 
 import torch

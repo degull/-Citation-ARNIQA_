@@ -53,25 +53,19 @@ class DistortionAttention(nn.Module):
     def __init__(self, in_channels):
         super(DistortionAttention, self).__init__()
 
-        # Ensure at least 1 channel for query, key convolutions
         query_key_channels = max(1, in_channels // 8)
-        
         self.query_conv = nn.Conv2d(in_channels, query_key_channels, kernel_size=1)
         self.key_conv = nn.Conv2d(in_channels, query_key_channels, kernel_size=1)
         self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
         self.softmax = nn.Softmax(dim=-1)
 
-        # Sobel Filters for Spatial Map
         sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=torch.float32)
         sobel_y = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=torch.float32)
         self.sobel_x = sobel_x.unsqueeze(0).unsqueeze(0)
         self.sobel_y = sobel_y.unsqueeze(0).unsqueeze(0)
 
-        # Trainable weights for spatial and channel maps
         self.spatial_weight = nn.Parameter(torch.tensor(0.1, dtype=torch.float32))
         self.channel_weight = nn.Parameter(torch.tensor(0.1, dtype=torch.float32))
-
-        # Distortion classifier
         self.distortion_classifier = DistortionClassifier(in_channels)
 
     def forward(self, x):
@@ -97,25 +91,41 @@ class DistortionAttention(nn.Module):
             distortion_type = distortion_types[i].item()
             spatial_map = self._apply_filter(x[i:i+1], distortion_type)
             spatial_maps.append(spatial_map)
+
+        # Concatenate spatial maps
         spatial_maps = torch.cat(spatial_maps, dim=0)
 
+        # Resize spatial_maps if needed to match out size
+        if spatial_maps.size(2) != h or spatial_maps.size(3) != w:
+            spatial_maps = F.interpolate(spatial_maps, size=(h, w), mode='bilinear', align_corners=False)
+
+        # Combine attention output with spatial maps
         out = out * (self.spatial_weight * spatial_maps)
         return out + x  # Residual connection
+
 
     def _apply_filter(self, x, distortion_type):
         if isinstance(distortion_type, str):
             distortion_type = distortion_map.get(distortion_type, -1)
 
         if distortion_type in [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 19, 20]:  # Sobel applicable distortions
-            return self._sobel_filter(x)
+            spatial_map = self._sobel_filter(x)
         elif distortion_type in [6, 7, 15, 16]:  # HSV analysis applicable distortions
-            return self._hsv_analysis(x)
+            spatial_map = self._hsv_analysis(x)
         elif distortion_type == 17:  # Histogram analysis applicable distortions
-            return self._histogram_analysis(x)
+            spatial_map = self._histogram_analysis(x)
         elif distortion_type in [14, 18, 21, 22, 23, 24]:  # Fourier Transform applicable distortions
-            return self._fourier_analysis(x)
+            spatial_map = self._fourier_analysis(x)
         else:
-            return torch.ones_like(x[:, :1, :, :])
+            spatial_map = torch.ones_like(x[:, :1, :, :])
+
+        # Ensure spatial_map size matches input size
+        _, _, h, w = x.size()
+        if spatial_map.size(2) != h or spatial_map.size(3) != w:
+            spatial_map = F.interpolate(spatial_map, size=(h, w), mode='bilinear', align_corners=False)
+
+        return spatial_map
+
 
     def _sobel_filter(self, x):
         sobel_x = self.sobel_x.repeat(x.size(1), 1, 1, 1).to(x.device)  # Repeat for each input channel
@@ -137,10 +147,32 @@ class DistortionAttention(nn.Module):
         return torch.sigmoid(hist_map)
 
     def _fourier_analysis(self, x):
-        fft = torch.fft.fft2(x, dim=(-2, -1))
+        _, _, h, w = x.shape
+
+        # Ensure the input is in float32 for compatibility with cuFFT
+        x = x.to(dtype=torch.float32)
+
+        # Adjust dimensions to powers of two
+        new_h = 2 ** (h - 1).bit_length()
+        new_w = 2 ** (w - 1).bit_length()
+        padding_h = (new_h - h) // 2
+        padding_w = (new_w - w) // 2
+
+        # Apply padding to make dimensions powers of two
+        x_padded = F.pad(x, (padding_w, padding_w, padding_h, padding_h), mode="constant", value=0)
+
+        # Compute FFT
+        fft = torch.fft.fft2(x_padded, dim=(-2, -1))
         fft_shift = torch.fft.fftshift(fft, dim=(-2, -1))
         magnitude = torch.sqrt(fft_shift.real ** 2 + fft_shift.imag ** 2)
+
+        # Remove padding to restore original size
+        magnitude = magnitude[:, :, padding_h:padding_h + h, padding_w:padding_w + w]
+
+        # Return normalized spatial map
         return torch.sigmoid(magnitude.mean(dim=1, keepdim=True))
+
+
 
     def _rgb_to_hsv(self, x):
         max_rgb, _ = x.max(dim=1, keepdim=True)
@@ -176,10 +208,11 @@ class HardNegativeCrossAttention(nn.Module):
 
 
 if __name__ == "__main__":
-    x = torch.randn(2, 3, 64, 64)  # Random input tensor
+    x = torch.randn(2, 3, 7, 7)  # 입력 크기가 7x7인 텐서
     distortion_attention = DistortionAttention(in_channels=3)
-    output = distortion_attention(x)
-    print("DistortionAttention Output shape:", output.shape)
+    output = distortion_attention._fourier_analysis(x)
+    print("Output Shape:", output.shape)
+
 
 
 

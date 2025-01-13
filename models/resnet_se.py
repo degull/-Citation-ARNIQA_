@@ -55,10 +55,17 @@ class ResNetSE(nn.Module):
      """
 
 # ver2
+import sys
+from pathlib import Path
+
+# 프로젝트 루트 경로를 sys.path에 추가
+project_root = Path(__file__).resolve().parent.parent
+sys.path.append(str(project_root))
 
 import torch
 import torch.nn as nn
 from torchvision.models import resnet50
+from models.attention_se import DistortionAttention
 
 class SEBlock(nn.Module):
     def __init__(self, in_channels, reduction=16, use_depthwise=False):
@@ -108,6 +115,12 @@ class ResNetSE(nn.Module):
         self.se3 = SEBlock(1024)
         self.se4 = SEBlock(2048)
 
+        # DistortionAttention 추가
+        self.distortion_attention1 = DistortionAttention(256)
+        self.distortion_attention2 = DistortionAttention(512)
+        self.distortion_attention3 = DistortionAttention(1024)
+        self.distortion_attention4 = DistortionAttention(2048)
+
     def forward(self, x):
         x = self.layer0(x)
         print(f"[Debug] After layer0: {x.shape}")
@@ -117,26 +130,35 @@ class ResNetSE(nn.Module):
         print(f"[Debug] After layer1: {x.shape}")
         x = self.se1(x)
         print(f"[Debug] After SE1: {x.shape}")
+        x = self.distortion_attention1(x)
+        print(f"[Debug] After DistortionAttention1: {x.shape}")
 
         # Layer 2
         x = self.layer2(x)
         print(f"[Debug] After layer2: {x.shape}")
         x = self.se2(x)
         print(f"[Debug] After SE2: {x.shape}")
+        x = self.distortion_attention2(x)
+        print(f"[Debug] After DistortionAttention2: {x.shape}")
 
         # Layer 3
         x = self.layer3(x)
         print(f"[Debug] After layer3: {x.shape}")
         x = self.se3(x)
         print(f"[Debug] After SE3: {x.shape}")
+        x = self.distortion_attention3(x)
+        print(f"[Debug] After DistortionAttention3: {x.shape}")
 
         # Layer 4
         x = self.layer4(x)
         print(f"[Debug] After layer4: {x.shape}")
         x = self.se4(x)
         print(f"[Debug] After SE4: {x.shape}")
+        x = self.distortion_attention4(x)
+        print(f"[Debug] After DistortionAttention4: {x.shape}")
 
         return x
+
 
 
 
