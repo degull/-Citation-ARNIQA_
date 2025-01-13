@@ -50,23 +50,7 @@ class DistortionClassifier(nn.Module):
         x = self.fc(x)
         return x
 
-class DistortionClassifier(nn.Module):
-    def __init__(self, in_channels, num_distortions=25):
-        super(DistortionClassifier, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1, 1))
-        )
-        self.fc = nn.Linear(128, num_distortions)
 
-    def forward(self, x):
-        x = self.conv(x)
-        x = x.view(x.size(0), -1)  # Flatten
-        x = self.fc(x)
-        return x
 
 class DistortionAttention(nn.Module):
     def __init__(self, in_channels):
@@ -159,7 +143,7 @@ class DistortionAttention(nn.Module):
         value = max_rgb
         return torch.cat((delta, saturation, value), dim=1)
 
-
+# 수정 전
 class HardNegativeCrossAttention(nn.Module):
     def __init__(self, in_channels):
         super(HardNegativeCrossAttention, self).__init__()
@@ -182,6 +166,48 @@ class HardNegativeCrossAttention(nn.Module):
         out = torch.bmm(attention, value).permute(0, 2, 1).contiguous().view(b, c, h, w)
 
         return out + x_attr  # Residual connection
+
+
+# 수정 후 
+""" class HardNegativeCrossAttention(nn.Module):
+    def __init__(self, in_channels, num_heads=8):
+        super(HardNegativeCrossAttention, self).__init__()
+        self.num_heads = num_heads
+        self.query_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.key_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.output_proj = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.softmax = nn.Softmax(dim=-1)
+        self.layer_norm = None  # 동적 LayerNorm
+
+    def forward(self, x_attr, x_texture):
+        b, c, h, w = x_attr.size()
+        head_dim = c // self.num_heads
+        assert c % self.num_heads == 0, "Number of heads must divide channels evenly."
+
+        # Generate query, key, value tensors
+        query = self.query_conv(x_attr).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
+        key = self.key_conv(x_texture).view(b, self.num_heads, head_dim, h * w)
+        value = self.value_conv(x_texture).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
+
+        # Scale factor for stability
+        scale = head_dim ** -0.5
+        attention = self.softmax(torch.matmul(query, key) * scale)  # Shape: (b, num_heads, hw, hw)
+        out = torch.matmul(attention, value).permute(0, 1, 3, 2).contiguous()
+
+        # Reshape and merge heads
+        out = out.view(b, c, h, w)
+
+        # Output projection and residual connection
+        out = self.output_proj(out) + x_attr
+
+        # 동적 LayerNorm 적용
+        if self.layer_norm is None or self.layer_norm.normalized_shape != (c, h, w):
+            self.layer_norm = nn.LayerNorm([c, h, w]).to(out.device)
+
+        out = self.layer_norm(out)
+        return out """
+
 
 
 if __name__ == "__main__":

@@ -1,3 +1,9 @@
+import sys
+import os
+
+# 프로젝트 경로 추가
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import torch
 import torch.nn as nn
 from torchvision.models import resnet50
@@ -53,28 +59,36 @@ class ResNetSE(nn.Module):
     def forward(self, x):
         # Layer 0
         x = self.layer0(x)
+        print(f"Layer0 output: {x.size()}")  # 출력 크기 확인
 
         # Layer 1
         x = self.layer1(x)
         x = self.distortion_attention1(x)
         x = self.se1(x)
+        print(f"Layer1 output: {x.size()}")
 
         # Layer 2
         x = self.layer2(x)
         x = self.distortion_attention2(x)
         x = self.se2(x)
+        print(f"Layer2 output: {x.size()}")
 
         # Layer 3
         x = self.layer3(x)
         x = self.distortion_attention3(x)
         x = self.se3(x)
+        print(f"Layer3 output: {x.size()}")
 
         # Layer 4
         x = self.layer4(x)
         x_attr = self.distortion_attention4(x)
         x_texture = self.se4(x)
+        print(f"Layer4 output (before attention): {x.size()}")
+
         x = self.hard_negative_attention(x_attr, x_texture)
+        print(f"Layer4 output (after attention): {x.size()}")
 
         # Global Average Pooling
         x = self.global_avg_pool(x)
+        print(f"Global Avg Pool output: {x.size()}")
         return x.view(x.size(0), -1)  # (batch_size, 2048)

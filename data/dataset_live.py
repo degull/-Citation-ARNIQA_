@@ -53,6 +53,8 @@ def get_distortion_levels():
         'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5]
     }
 
+
+
 def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, applied_distortions_B):
     print(f"[Debug] Verifying Positive Pairs:")
     print(f" - Distortion A: {distortions_A}, Distortion B: {distortions_B}")
@@ -70,15 +72,37 @@ class LIVEDataset(Dataset):
         self.root = root
         self.crop_size = crop_size
 
-        # CSV 파일 확인 및 로드
+        # 왜곡 유형 및 강도 레벨 정의
+        self.distortion_levels = {
+            'gaussian_blur': [1, 2, 3, 4, 5],
+            'lens_blur': [1, 2, 3, 4, 5],
+            'motion_blur': [1, 2, 3, 4, 5],
+            'color_diffusion': [0.05, 0.1, 0.2, 0.3, 0.4],
+            'color_shift': [10, 20, 30, 40, 50],
+            'jpeg2000': [0.1, 0.2, 0.3, 0.4, 0.5],
+            'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
+            'white_noise': [5, 10, 15, 20, 25],
+            'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
+            'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5]
+        }
+
+        # CSV 파일 로드
         csv_path = os.path.join(self.root, "LIVE_Challenge.txt")
         if not os.path.isfile(csv_path):
             raise FileNotFoundError(f"LIVE_Challenge.txt 파일이 {csv_path} 경로에 존재하지 않습니다.")
 
-        # CSV 데이터 로드
         scores_csv = pd.read_csv(csv_path, sep=",")
-        self.image_paths = [os.path.join(self.root, path.replace("LIVE_Challenge/", "")) for path in scores_csv["dis_img_path"].values]
+        self.image_paths = [
+            os.path.join(self.root, path.replace("LIVE_Challenge/", ""))
+            for path in scores_csv["dis_img_path"].values
+        ]
         self.mos = scores_csv["score"].values
+
+        # 기본 변환 정의
+        self.transform = transforms.Compose([
+            transforms.Resize((self.crop_size, self.crop_size)),
+            transforms.ToTensor(),
+        ])
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
@@ -229,7 +253,7 @@ class LIVEDataset(Dataset):
 
     
     
-    def apply_random_distortions(self, image, distortions=None, levels=None):
+    def apply_random_distortion(self, image, distortions=None, levels=None):
         if distortions is None:
             distortions = random.sample(list(self.distortion_levels.keys()), 1)
         if levels is None:
@@ -246,41 +270,26 @@ class LIVEDataset(Dataset):
 
     def __getitem__(self, index: int):
         try:
-            img_A_orig = Image.open(self.image_paths[index]).convert("RGB")
-            img_B_orig = Image.open(self.reference_paths[index]).convert("RGB")
+            img_orig = Image.open(self.image_paths[index]).convert("RGB")
         except Exception as e:
-            print(f"[Error] Loading image: {self.image_paths[index]} or {self.reference_paths[index]}: {e}")
+            print(f"[Error] Loading image: {self.image_paths[index]}: {e}")
             return None
 
-        # 동일한 왜곡 적용
-        distortions = random.sample(list(self.distortion_levels.keys()), 1)
-        levels = [random.choice(self.distortion_levels[distortions[0]])]
+        # 원본 이미지 변환
+        img_A = self.transform(img_orig)
 
-        # 디버깅 로그 추가
-        print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
+        # 왜곡 이미지 생성 및 변환
+        img_B = self.apply_random_distortion(img_orig)
+        img_B = self.transform(img_B)
 
-        img_A_distorted = self.apply_random_distortions(img_A_orig, distortions, levels)
-        img_B_distorted = self.apply_random_distortions(img_B_orig, distortions, levels)
-
-        # Positive Pair 검증
-        verify_positive_pairs(
-            distortions_A=distortions[0],
-            distortions_B=distortions[0],
-            applied_distortions_A=levels[0],
-            applied_distortions_B=levels[0],
-        )
-
-        img_A_orig = self.transform(img_A_orig)
-        img_B_orig = self.transform(img_B_orig)
-        img_A_distorted = self.transform(img_A_distorted)
-        img_B_distorted = self.transform(img_B_distorted)
+        # MOS 점수
+        mos = torch.tensor(self.mos[index], dtype=torch.float32)
 
         return {
-            "img_A": torch.stack([img_A_orig, img_A_distorted]),
-            "img_B": torch.stack([img_B_orig, img_B_distorted]),
-            "mos": torch.tensor(self.mos[index], dtype=torch.float32),
+            "img_A": img_A,
+            "img_B": img_B,
+            "mos": mos,
         }
-
 
     def __len__(self):
         return len(self.image_paths)
