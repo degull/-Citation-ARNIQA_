@@ -367,9 +367,9 @@ class KADID10KDataset(Dataset):
                 noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
                 
                 # 디버깅: noise와 noisy_image 값 확인
-                print("White Noise Debug:")
-                print("Noise min/max:", noise.min(), noise.max())
-                print("Noisy Image min/max:", noisy_image.min(), noisy_image.max())
+                #print("White Noise Debug:")
+                #print("Noise min/max:", noise.min(), noise.max())
+                #print("Noisy Image min/max:", noisy_image.min(), noisy_image.max())
                 
                 # 다시 PIL 이미지로 변환
                 image = Image.fromarray(noisy_image)
@@ -458,7 +458,7 @@ class KADID10KDataset(Dataset):
             levels = [random.choice(self.distortion_levels[distortion]) for distortion in distortions]
 
         for distortion, level in zip(distortions, levels):
-            print(f"[Debug] Applying distortion: {distortion} with level: {level}")
+            #print(f"[Debug] Applying distortion: {distortion} with level: {level}")
             try:
                 image = self.apply_distortion(image, distortion, level)
             except Exception as e:
@@ -479,7 +479,7 @@ class KADID10KDataset(Dataset):
         levels = [random.choice(self.distortion_levels[distortions[0]])]
 
         # 디버깅 로그 추가
-        print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
+        #print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
 
         img_A_distorted = self.apply_random_distortions(img_A_orig, distortions, levels)
         img_B_distorted = self.apply_random_distortions(img_B_orig, distortions, levels)

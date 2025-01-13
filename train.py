@@ -1,5 +1,5 @@
-# KADID
-
+#KADID
+""" 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -88,8 +88,6 @@ def validate(args, model, dataloader, device):
                 inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
 
             proj_A, proj_B = model(inputs_A, inputs_B)
-            print("[Debug] proj_A shape:", proj_A.shape)
-            print("[Debug] proj_B shape:", proj_B.shape)
 
             proj_A = F.normalize(proj_A, dim=1).cpu().numpy()
             proj_B = F.normalize(proj_B, dim=1).cpu().numpy()
@@ -126,21 +124,36 @@ def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler
 
             hard_negatives = generate_hard_negatives(inputs_B, scale_factor=0.5)
 
-            # 모델의 입력 채널 크기에 맞게 변환
-            if hard_negatives.shape[1] != inputs_A.shape[1]:  # 입력 채널 확인
-                hard_negatives = hard_negatives.view(-1, inputs_A.shape[1], *hard_negatives.shape[2:]).to(device)
+            # Debug: Log hard_negatives shape
+            print(f"[Debug] hard_negatives shape before processing: {hard_negatives.shape}")
+
+            if hard_negatives.dim() == 5:
+                hard_negatives = hard_negatives.view(-1, *hard_negatives.shape[2:]).to(device)
+            elif hard_negatives.dim() != 4:
+                raise ValueError(f"[Error] Unexpected hard_negatives dimensions: {hard_negatives.shape}")
 
             optimizer.zero_grad()
 
             with torch.cuda.amp.autocast():
                 proj_A, proj_B = model(inputs_A, inputs_B)
+
+                # Normalize projections
                 proj_A = F.normalize(proj_A, dim=1)
                 proj_B = F.normalize(proj_B, dim=1)
 
-                features_A = model.backbone(inputs_A).mean([2, 3])
-                proj_negatives = F.normalize(model.projector(model.backbone(hard_negatives).mean([2, 3])), dim=1)
+                # Backbone processing for hard negatives
+                features_negatives = model.backbone(hard_negatives)
+                print(f"[Debug] features_negatives shape after backbone: {features_negatives.shape}")
 
-                loss = model.compute_loss(proj_A, proj_B, proj_negatives, features_A)
+                if features_negatives.dim() == 4:
+                    features_negatives = features_negatives.mean([2, 3])
+                elif features_negatives.dim() != 2:
+                    raise ValueError(f"[Error] Unexpected features_negatives dimensions: {features_negatives.shape}")
+
+                proj_negatives = F.normalize(model.projector(features_negatives), dim=1)
+
+                # Compute loss
+                loss = model.compute_loss(proj_A, proj_B, proj_negatives)
 
             if torch.isnan(loss) or torch.isinf(loss):
                 print("[Warning] NaN or Inf detected in loss. Skipping batch.")
@@ -153,7 +166,6 @@ def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler
 
             progress_bar.set_postfix(loss=running_loss / (len(progress_bar) + 1))
 
-        # Epoch 평균 손실 기록
         avg_loss = running_loss / len(train_dataloader)
         train_metrics['loss'].append(avg_loss)
 
@@ -483,219 +495,17 @@ if __name__ == "__main__":
     print("\nTraining Metrics:", train_metrics)
     print("Validation Metrics:", val_metrics)
     print("Test Metrics:", test_metrics)
-
-
-
-# Training Metrics: {'loss': [0.977246010894174, 0.9814919378306415, 0.9717696172160071, 0.9651085283305194, 0.9457666422869708, 0.9572058212649714, 0.9260210964056823, 0.909191359002311, 0.897196088019792, 0.9037449225649103]}
-# Validation Metrics: {'srcc': [0.9369065630207829, 0.937873245873134, 0.9380598100004831, 0.9347579676961171, 0.9379627639713481, 0.9376647839565854, 0.9356669019033947, 0.9331197464952032, 0.9356527854637128, 0.9332537216736471], 'plcc': [0.9414624740006772, 0.9429755566820393, 0.9430955812066407, 0.9399344131086256, 0.942561365741839, 0.9427084106692083, 0.9413439375917318, 0.9384612448100849, 0.9409808185171208, 0.9382733897716338]}
-# Test Metrics: {'srcc': 0.936270586637532, 'plcc': 0.9412231579154473}
-
-
-# kadid 시각화
-""" 
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, random_split
-import numpy as np
-from dotmap import DotMap
-from pathlib import Path
-from scipy import stats
-from tqdm import tqdm
-from sklearn.linear_model import Ridge
-from data import KADID10KDataset
-from models.simclr import SimCLR
-from utils.utils import parse_config
-from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
-import matplotlib.pyplot as plt
-import yaml
-import torch.nn.functional as F
-
-# Config loader
-def load_config(config_path: str) -> DotMap:
-    with open(config_path, 'r') as file:
-        config = yaml.safe_load(file)
-    return DotMap(config)
-
-def save_checkpoint(model: nn.Module, checkpoint_path: Path, epoch: int, srocc: float) -> None:
-    filename = f"epoch_{epoch}_srocc_{srocc:.3f}.pth"
-    torch.save(model.state_dict(), checkpoint_path / filename)
-
-def calculate_srcc_plcc(proj_A, proj_B):
-    proj_A = proj_A.detach().cpu().numpy()
-    proj_B = proj_B.detach().cpu().numpy()
-    assert proj_A.shape == proj_B.shape, "Shape mismatch between proj_A and proj_B"
-    srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
-    plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
-    return srocc, plcc
-
-def grad_cam_visualization(model, input_image, target_layer_name, save_path):
-    model.eval()
-    input_image = input_image.unsqueeze(0).to(next(model.parameters()).device)
-    input_image.requires_grad = True
-
-    # Hook to capture gradients and activations
-    gradients = []
-    activations = []
-
-    def backward_hook(module, grad_input, grad_output):
-        gradients.append(grad_output[0])
-        return None
-
-    def forward_hook(module, input, output):
-        activations.append(output)
-        return None
-
-    # Register hooks
-    for name, module in model.named_modules():
-        if name == target_layer_name:
-            module.register_forward_hook(forward_hook)
-            module.register_backward_hook(backward_hook)
-
-    # Forward pass
-    output = model(input_image)
-    target_class = output.argmax(dim=1)
-    loss = output[0, target_class]
-    loss.backward()
-
-    # Grad-CAM calculation
-    grad = gradients[0]
-    activation = activations[0]
-    weights = grad.mean(dim=(2, 3), keepdim=True)
-    cam = (weights * activation).sum(dim=1).squeeze().cpu().detach().numpy()
-    cam = np.maximum(cam, 0)  # ReLU
-    cam = (cam - cam.min()) / (cam.max() - cam.min())  # Normalize to [0, 1]
-
-    # Upsample CAM to match input size
-    cam = torch.tensor(cam).unsqueeze(0).unsqueeze(0)
-    cam = F.interpolate(cam, size=input_image.shape[2:], mode='bilinear', align_corners=False)
-    cam = cam.squeeze().cpu().numpy()
-
-    # Plot original image and CAM
-    plt.figure(figsize=(10, 5))
-    plt.subplot(1, 2, 1)
-    plt.imshow(input_image.squeeze().permute(1, 2, 0).cpu().numpy())
-    plt.title("Original Image")
-    plt.axis("off")
-    plt.subplot(1, 2, 2)
-    plt.imshow(input_image.squeeze().permute(1, 2, 0).cpu().numpy(), alpha=0.5)
-    plt.imshow(cam, cmap='jet', alpha=0.5)
-    plt.title("Grad-CAM")
-    plt.axis("off")
-    plt.savefig(save_path)
-    plt.show()
-
-def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler, device):
-    checkpoint_path = Path(str(args.checkpoint_base_path))
-    checkpoint_path.mkdir(parents=True, exist_ok=True)
-    best_srocc = -1
-
-    train_metrics = {'loss': []}
-    val_metrics = {'srcc': [], 'plcc': []}
-
-    for epoch in range(args.training.epochs):
-        model.train()
-        running_loss = 0.0
-        progress_bar = tqdm(train_dataloader, desc=f"Epoch [{epoch + 1}/{args.training.epochs}]")
-
-        for i, batch in enumerate(progress_bar):
-            inputs_A = batch["img_A"].to(device)
-            optimizer.zero_grad()
-
-            with torch.cuda.amp.autocast():
-                proj_A = model(inputs_A)
-                loss = model.compute_loss(proj_A, proj_A, proj_A, proj_A)
-
-            if torch.isnan(loss) or torch.isinf(loss):
-                print("[Warning] NaN or Inf detected in loss. Skipping batch.")
-                continue
-
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
-            progress_bar.set_postfix(loss=running_loss / (i + 1))
-
-            # Grad-CAM visualization every 10 batches
-            if i % 10 == 0:
-                grad_cam_visualization(
-                    model=model,
-                    input_image=inputs_A[0],
-                    target_layer_name="backbone.layer4",
-                    save_path=f"gradcam_epoch{epoch}_batch{i}.png"
-                )
-
-        avg_loss = running_loss / len(train_dataloader)
-        train_metrics['loss'].append(avg_loss)
-
-        # Validation
-        val_srocc, val_plcc = calculate_srcc_plcc(proj_A, proj_A)
-        val_metrics['srcc'].append(val_srocc)
-        val_metrics['plcc'].append(val_plcc)
-
-        lr_scheduler.step()
-
-        if val_srocc > best_srocc:
-            best_srocc = val_srocc
-            save_checkpoint(model, checkpoint_path, epoch, val_srocc)
-
-    print("Training completed.")
-    return train_metrics, val_metrics
-
-if __name__ == "__main__":
-    config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
-    args = load_config(config_path)
-
-    device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
-    dataset_path = Path(args.data_base_path) / "kadid10k.csv"
-    dataset = KADID10KDataset(dataset_path)
-
-    train_size = int(0.7 * len(dataset))
-    val_size = int(0.1 * len(dataset))
-    test_size = len(dataset) - train_size - val_size
-
-    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
-
-    train_dataloader = DataLoader(
-        train_dataset, batch_size=args.training.batch_size, shuffle=True, num_workers=4
-    )
-    val_dataloader = DataLoader(
-        val_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4
-    )
-    test_dataloader = DataLoader(
-        test_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4
-    )
-
-    model = SimCLR(embedding_dim=128, temperature=args.model.temperature).to(device)
-    optimizer = torch.optim.SGD(
-        model.parameters(),
-        lr=args.training.learning_rate,
-        momentum=args.training.optimizer.momentum,
-        weight_decay=args.training.optimizer.weight_decay
-    )
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer,
-        T_0=args.training.lr_scheduler.T_0,
-        T_mult=args.training.lr_scheduler.T_mult,
-        eta_min=args.training.lr_scheduler.eta_min
-    )
-
-    # Train
-    train_metrics, val_metrics = train(
-        args,
-        model,
-        train_dataloader,
-        val_dataloader,
-        optimizer,
-        lr_scheduler,
-        device
-    )
-
-    print("\nTraining Metrics:", train_metrics)
-    print("Validation Metrics:", val_metrics)
-
  """
 
+# Training Metrics: {'loss': [0.7686459263345189, 0.7715813556589337, 0.7580022199697473, 0.7390993061910633, 0.7330587068341387, 0.7094864248556693, 0.6790706018158329, 0.656973103570077, 0.658129592445042, 0.6539432713867042]}
+# Validation Metrics: {'srcc': [0.9369970935451635, 0.9364419593681123, 0.9353765132161436, 0.936218218360584, 0.9338744120782958, 0.9348942748556499, 0.931227948057318, 0.9312314522671019, 0.9265542097272341, 
+# 0.9347717103299581], 'plcc': [0.9415914918050985, 0.9409555131953475, 0.9397106435276338, 0.9406181322098353, 0.9382513346102095, 0.9398124284436276, 0.9357886273608912, 0.9362907462564223, 0.9316025511341239, 0.9390125717015866]}
+# Test Metrics: {'srcc': 0.9341844429747825, 'plcc': 0.9380751799502336}
+ 
+
 # TID2013
-""" import torch
+""" 
+import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -819,21 +629,36 @@ def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler
 
             hard_negatives = generate_hard_negatives(inputs_B, scale_factor=0.5)
 
-            # 모델의 입력 채널 크기에 맞게 변환
-            if hard_negatives.shape[1] != inputs_A.shape[1]:  # 입력 채널 확인
-                hard_negatives = hard_negatives.view(-1, inputs_A.shape[1], *hard_negatives.shape[2:]).to(device)
+            # Debug: Log hard_negatives shape
+            print(f"[Debug] hard_negatives shape before processing: {hard_negatives.shape}")
+
+            if hard_negatives.dim() == 5:
+                hard_negatives = hard_negatives.view(-1, *hard_negatives.shape[2:]).to(device)
+            elif hard_negatives.dim() != 4:
+                raise ValueError(f"[Error] Unexpected hard_negatives dimensions: {hard_negatives.shape}")
 
             optimizer.zero_grad()
 
             with torch.cuda.amp.autocast():
                 proj_A, proj_B = model(inputs_A, inputs_B)
+
+                # Normalize projections
                 proj_A = F.normalize(proj_A, dim=1)
                 proj_B = F.normalize(proj_B, dim=1)
 
-                features_A = model.backbone(inputs_A).mean([2, 3])
-                proj_negatives = F.normalize(model.projector(model.backbone(hard_negatives).mean([2, 3])), dim=1)
+                # Backbone processing for hard negatives
+                features_negatives = model.backbone(hard_negatives)
+                print(f"[Debug] features_negatives shape after backbone: {features_negatives.shape}")
 
-                loss = model.compute_loss(proj_A, proj_B, proj_negatives, features_A)
+                if features_negatives.dim() == 4:
+                    features_negatives = features_negatives.mean([2, 3])
+                elif features_negatives.dim() != 2:
+                    raise ValueError(f"[Error] Unexpected features_negatives dimensions: {features_negatives.shape}")
+
+                proj_negatives = F.normalize(model.projector(features_negatives), dim=1)
+
+                # Compute loss
+                loss = model.compute_loss(proj_A, proj_B, proj_negatives)
 
             if torch.isnan(loss) or torch.isinf(loss):
                 print("[Warning] NaN or Inf detected in loss. Skipping batch.")
@@ -846,7 +671,6 @@ def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler
 
             progress_bar.set_postfix(loss=running_loss / (len(progress_bar) + 1))
 
-        # Epoch 평균 손실 기록
         avg_loss = running_loss / len(train_dataloader)
         train_metrics['loss'].append(avg_loss)
 
@@ -1172,7 +996,6 @@ if __name__ == "__main__":
     # Test
     test_metrics = test(args, model, test_dataloader, device)
 
-    print("TID2013\n")
     # Results
     print("\nTraining Metrics:", train_metrics)
     print("Validation Metrics:", val_metrics)
@@ -1181,16 +1004,13 @@ if __name__ == "__main__":
  """
 
 # TID2013
-# 
-# Training Metrics: {'loss': [1.2110933065414429, 1.2052922655235638, 1.2022128990202239, 1.177148851481351, 1.1816325612140424, 1.1618688955451504, 1.1687270773179603, 1.1533742294167026, 1.1867063668641178, 
-# 1.1669688613125773]}
-# Validation Metrics: {'srcc': [0.9286899142112368, 0.9261572339079104, 0.9282468317159432, 0.933715630200403, 0.9327686079104744, 0.9351179847946514, 0.9255923989647803, 0.9329130688234877, 0.9253675839731841, 0.9274092553073322], 'plcc': [0.9374949964793877, 0.9342140084566996, 0.9365152566328799, 0.9415865656687996, 0.9400136167628566, 0.9427488495653078, 0.9351783331301176, 0.9403850007902612, 0.9334177054979461, 0.9353419602640152]}
-# Test Metrics: {'srcc': 0.9440700959169266, 'plcc': 0.950194337036581}
-
+# Training Metrics: {'loss': [0.737725217685555, 0.7462933761152354, 0.7331488028620229, 0.728813994337212, 0.7262638802781249, 0.7203712382099845, 0.7052614436005101, 0.6887555192365791, 0.6921453360806812, 0.7010436071590944]}
+# Validation Metrics: {'srcc': [0.9355765201783354, 0.9271368421769867, 0.933620621790592, 0.933241494979803, 0.9324303495644619, 0.9317366455243902, 0.9332166350691363, 0.933214911379564, 0.9305469230903206, 0.9266090703519732], 'plcc': [0.9397409227816345, 0.9314102412624932, 0.9379510408039685, 0.9376009360227731, 0.9360172191086796, 0.9362024132206633, 0.9365501446472317, 0.9373739779775768, 0.9339405153216597, 0.9316460471373]}
+# Test Metrics: {'srcc': 0.93056694121473, 'plcc': 0.9363675209819101}
 
 
 # SPAQ
-""" import torch
+import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -1314,21 +1134,36 @@ def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler
 
             hard_negatives = generate_hard_negatives(inputs_B, scale_factor=0.5)
 
-            # 모델의 입력 채널 크기에 맞게 변환
-            if hard_negatives.shape[1] != inputs_A.shape[1]:  # 입력 채널 확인
-                hard_negatives = hard_negatives.view(-1, inputs_A.shape[1], *hard_negatives.shape[2:]).to(device)
+            # Debug: Log hard_negatives shape
+            print(f"[Debug] hard_negatives shape before processing: {hard_negatives.shape}")
+
+            if hard_negatives.dim() == 5:
+                hard_negatives = hard_negatives.view(-1, *hard_negatives.shape[2:]).to(device)
+            elif hard_negatives.dim() != 4:
+                raise ValueError(f"[Error] Unexpected hard_negatives dimensions: {hard_negatives.shape}")
 
             optimizer.zero_grad()
 
             with torch.cuda.amp.autocast():
                 proj_A, proj_B = model(inputs_A, inputs_B)
+
+                # Normalize projections
                 proj_A = F.normalize(proj_A, dim=1)
                 proj_B = F.normalize(proj_B, dim=1)
 
-                features_A = model.backbone(inputs_A).mean([2, 3])
-                proj_negatives = F.normalize(model.projector(model.backbone(hard_negatives).mean([2, 3])), dim=1)
+                # Backbone processing for hard negatives
+                features_negatives = model.backbone(hard_negatives)
+                print(f"[Debug] features_negatives shape after backbone: {features_negatives.shape}")
 
-                loss = model.compute_loss(proj_A, proj_B, proj_negatives, features_A)
+                if features_negatives.dim() == 4:
+                    features_negatives = features_negatives.mean([2, 3])
+                elif features_negatives.dim() != 2:
+                    raise ValueError(f"[Error] Unexpected features_negatives dimensions: {features_negatives.shape}")
+
+                proj_negatives = F.normalize(model.projector(features_negatives), dim=1)
+
+                # Compute loss
+                loss = model.compute_loss(proj_A, proj_B, proj_negatives)
 
             if torch.isnan(loss) or torch.isinf(loss):
                 print("[Warning] NaN or Inf detected in loss. Skipping batch.")
@@ -1341,7 +1176,6 @@ def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler
 
             progress_bar.set_postfix(loss=running_loss / (len(progress_bar) + 1))
 
-        # Epoch 평균 손실 기록
         avg_loss = running_loss / len(train_dataloader)
         train_metrics['loss'].append(avg_loss)
 
@@ -1667,13 +1501,11 @@ if __name__ == "__main__":
     # Test
     test_metrics = test(args, model, test_dataloader, device)
 
-    print("SPAQ\n")
     # Results
     print("\nTraining Metrics:", train_metrics)
     print("Validation Metrics:", val_metrics)
     print("Test Metrics:", test_metrics)
 
- """
 
 
 
