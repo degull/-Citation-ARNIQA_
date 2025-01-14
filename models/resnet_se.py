@@ -12,19 +12,19 @@ from models.attention_se import DistortionAttention, HardNegativeCrossAttention
 class SEBlock(nn.Module):
     def __init__(self, in_channels, reduction=16):
         super(SEBlock, self).__init__()
-        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)  # Squeeze: 채널 별 전역 평균 계산
         self.fc = nn.Sequential(
-            nn.Linear(in_channels, in_channels // reduction, bias=False),
+            nn.Linear(in_channels, in_channels // reduction, bias=False),   # 채널 축소
             nn.ReLU(inplace=True),
-            nn.Linear(in_channels // reduction, in_channels, bias=False),
+            nn.Linear(in_channels // reduction, in_channels, bias=False),   # 채널 복원
             nn.Sigmoid()
         )
 
     def forward(self, x):
-        b, c, _, _ = x.size()
-        y = self.global_avg_pool(x).view(b, c)
-        y = self.fc(y).view(b, c, 1, 1)
-        return x * y
+        b, c, _, _ = x.size()   # (배치 크기, 채널, 높이, 너비)
+        y = self.global_avg_pool(x).view(b, c)  # Squeeze 단계
+        y = self.fc(y).view(b, c, 1, 1) # Excitation 단계
+        return x * y    # 입력 텐서와 채널 중요도 스칼라 곱
 
 
 class ResNetSE(nn.Module):
@@ -92,3 +92,12 @@ class ResNetSE(nn.Module):
         x = self.global_avg_pool(x)
         print(f"Global Avg Pool output: {x.size()}")
         return x.view(x.size(0), -1)  # (batch_size, 2048)
+
+
+if __name__ == "__main__":
+    x = torch.randn(32, 256, 28, 28)  # 배치 크기 32, 채널 256, 크기 28x28
+    se_block = SEBlock(256, reduction=16)  # 채널 축소 비율 16
+    output = se_block(x)
+
+    print("입력 크기:", x.size())  # [32, 256, 28, 28]
+    print("출력 크기:", output.size())  # [32, 256, 28, 28]
