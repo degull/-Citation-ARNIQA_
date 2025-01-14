@@ -316,12 +316,21 @@ class AttributeFeatureProcessor(nn.Module):
     def __init__(self, in_channels):
         super(AttributeFeatureProcessor, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels, kernel_size=2, stride=2),
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),  # 첫 번째 Conv
+            nn.BatchNorm2d(in_channels),
+            nn.ReLU(),
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),  # 두 번째 Conv
+            nn.BatchNorm2d(in_channels),
+            nn.ReLU(),
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),  # 세 번째 Conv
+            nn.BatchNorm2d(in_channels),
             nn.ReLU()
         )
 
     def forward(self, x):
         return self.conv(x)
+
+
 
 
 class TextureBlockProcessor(nn.Module):
@@ -428,7 +437,7 @@ class DistortionAttention(nn.Module):
         value = max_rgb
         return torch.cat((delta, saturation, value), dim=1)
 
-class HardNegativeCrossAttention(nn.Module):
+""" class HardNegativeCrossAttention(nn.Module):
     def __init__(self, in_channels, num_heads=8):
         super(HardNegativeCrossAttention, self).__init__()
         self.num_heads = num_heads
@@ -483,12 +492,87 @@ class HardNegativeCrossAttention(nn.Module):
 
         out = self.layer_norm(out)
         return out
+ """
+
+class HardNegativeCrossAttention(nn.Module):
+    def __init__(self, in_channels, num_heads=8):
+        super(HardNegativeCrossAttention, self).__init__()
+        self.num_heads = num_heads
+        self.query_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.key_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.output_proj = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.softmax = nn.Softmax(dim=-1)
+        self.layer_norm = None
+
+        self.attribute_processor = AttributeFeatureProcessor(in_channels)
+        self.texture_processor = TextureBlockProcessor(in_channels)
+
+    def forward(self, x_attr, x_texture):
+        # Process attribute and texture features
+        x_attr = self.attribute_processor(x_attr)
+        x_texture = self.texture_processor(x_texture)
+
+        # Ensure compatibility for feature dimensions
+        if x_attr.size(2) != x_texture.size(2) or x_attr.size(3) != x_texture.size(3):
+            min_h = min(x_attr.size(2), x_texture.size(2))
+            min_w = min(x_attr.size(3), x_texture.size(3))
+            x_attr = F.adaptive_avg_pool2d(x_attr, (min_h, min_w))
+            x_texture = F.adaptive_avg_pool2d(x_texture, (min_h, min_w))
+
+        b, c, h, w = x_attr.size()
+        head_dim = c // self.num_heads
+        assert c % self.num_heads == 0, "Number of heads must divide channels evenly."
+
+        # Reshape query, key, and value
+        multi_head_query = self.query_conv(x_attr).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
+        multi_head_key = self.key_conv(x_texture).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 2, 3)
+        multi_head_value = self.value_conv(x_texture).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
+
+        # Scale factor for stability
+        scale = torch.sqrt(torch.tensor(head_dim, dtype=torch.float32).clamp(min=1e-6)).to(multi_head_query.device)
+        attention = self.softmax(torch.matmul(multi_head_query, multi_head_key) / scale)
+        out = torch.matmul(attention, multi_head_value).permute(0, 1, 3, 2).contiguous()
+
+        # Reshape and apply output projection
+        out = out.view(b, c, h, w)
+        out = self.output_proj(out)
+        out = nn.Dropout(p=0.1)(out) + x_attr
+
+        # Apply dynamic LayerNorm
+        if self.layer_norm is None or self.layer_norm.normalized_shape != (c, h, w):
+            self.layer_norm = nn.LayerNorm([c, h, w]).to(out.device)
+
+        out = self.layer_norm(out)
+        return out
 
 
+# Main Execution for Debugging
 if __name__ == "__main__":
-    x_attr = torch.randn(2, 64, 64, 64)  # Attribute Features
-    x_texture = torch.randn(2, 64, 64, 64)  # Texture Block Features
+    # 테스트를 위한 임의 입력 데이터
+    batch_size = 32
+    in_channels = 2048
+    height, width = 7, 7  # 입력 크기
 
-    hnca = HardNegativeCrossAttention(in_channels=64)
+    x_attr = torch.randn(batch_size, in_channels, height, width)  # Attribute Features
+    x_texture = torch.randn(batch_size, in_channels, height, width)  # Texture Block Features
+
+    print(f"Input x_attr shape: {x_attr.shape}")
+    print(f"Input x_texture shape: {x_texture.shape}")
+
+    # HardNegativeCrossAttention 초기화
+    hnca = HardNegativeCrossAttention(in_channels=in_channels, num_heads=8)
+
+    # Forward Pass
     output = hnca(x_attr, x_texture)
     print("HardNegativeCrossAttention Output shape:", output.shape)
+
+    # Global Average Pooling 적용
+    global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+    pooled_output = global_avg_pool(output)
+    print("Global Avg Pool Output shape:", pooled_output.shape)
+
+    # Projection Head
+    proj_head = nn.Linear(in_channels, 128)
+    final_output = proj_head(pooled_output.view(batch_size, -1))
+    print("Projection Head Output shape:", final_output.shape)
