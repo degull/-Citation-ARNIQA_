@@ -24,32 +24,32 @@ checkpoint_frequency: 1
 # Training settings
 training:
   epochs: 10
-  learning_rate: !!float 1e-7
+  learning_rate: !!float 5e-4
   batch_size: 16
   num_workers: 20
   log_images_frequency: 1000
   resume_training: false
   #step_size: 5
   #gamma: 0.1
-  dropout_rate: 0.1
+  dropout_rate: 0.2
   data:
     patch_size: 224
-    max_distortions: 6  # Maximum number of distortions per image
+    max_distortions: 4  # Maximum number of distortions per image
     num_levels: 5
     pristine_prob: 0.05
     distortions_per_group: 2  # Number of distortions per group
 
 
   optimizer:
-    name: SGD
+    name: AdamW
     momentum: 0.9
-    weight_decay: !!float 1e-4
+    weight_decay: !!float 1e-3
     lr_scheduler_type: cosine
   lr_scheduler:
     name: CosineAnnealingWarmRestarts
     T_0: 1
     T_mult: 2
-    eta_min: !!float 1e-6
+    eta_min: !!float 1e-3
 
 # Validation
 validation:
@@ -82,7 +82,7 @@ test:
 
 # Model
 model:
-  temperature: 0.07
+  temperature: 0.1
   encoder:
     embedding_dim: 128
     pretrained: true
