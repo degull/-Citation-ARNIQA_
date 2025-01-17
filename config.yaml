@@ -23,33 +23,35 @@ checkpoint_frequency: 1
 
 # Training settings
 training:
-  epochs: 10
-  learning_rate: !!float 5e-4
+  epochs: 3
+  learning_rate: !!float 1e-3
   batch_size: 16
   num_workers: 20
   log_images_frequency: 1000
   resume_training: false
   #step_size: 5
   #gamma: 0.1
-  dropout_rate: 0.2
+  dropout_rate: 0.1
+
   data:
-    patch_size: 224
-    max_distortions: 4  # Maximum number of distortions per image
-    num_levels: 5
-    pristine_prob: 0.05
-    distortions_per_group: 2  # Number of distortions per group
+    patch_size: 224   # patch size for training
+    max_distortions: 4  # maximum number of distortions to apply. Must be in the range [0, 7]
+    num_levels: 5   # number of distortion levels to consider. Must be in the range [1, 5]
+    pristine_prob: 0.05   # probability of not distorting images during training
 
 
   optimizer:
-    name: AdamW
+    name: SGD
     momentum: 0.9
-    weight_decay: !!float 1e-3
-    lr_scheduler_type: cosine
+    weight_decay: !!float 1e-4
+
+    #lr_scheduler_type: cosine
+
   lr_scheduler:
     name: CosineAnnealingWarmRestarts
     T_0: 1
     T_mult: 2
-    eta_min: !!float 1e-3
+    eta_min: !!float 1e-6
 
 # Validation
 validation:
@@ -57,9 +59,9 @@ validation:
   num_splits: 10
   alpha: 0.1
   visualize: true
-  early_stopping:
-    patience: 5
-    min_delta: 0.001
+  #early_stopping:
+  #  patience: 5
+  #  min_delta: 0.001
   datasets:
     - kadid10k
     - tid2013
@@ -73,12 +75,14 @@ test:
   num_splits: 10
   grid_search: true
   alpha: 0.1
-  tta: 5
-  datasets:
+  crop_size: 224  # crop size for inference
+  datasets:  # datasets to use for test
+    - live
+    - csiq
     - tid2013
     - kadid10k
+    - flive
     - spaq
-    - CSIQ
 
 # Model
 model:

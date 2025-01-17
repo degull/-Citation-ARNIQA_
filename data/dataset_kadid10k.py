@@ -263,43 +263,27 @@ def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, a
         print(f"[Positive Pair Verification] Error: Distortions do not match.")
 
 
-class KADID10KDataset(Dataset):
-    # 단일
+class KADID10KDataset:
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         super().__init__()
-        self.root = Path(root)
+        self.root = str(root)
         self.phase = phase
         self.crop_size = crop_size
-
-        # distortion_levels 초기화
         self.distortion_levels = get_distortion_levels()
 
-        # CSV 파일 확인
-        if self.root.is_file():
-            csv_path = self.root
-            self.dataset_root = self.root.parent
-        else:
-            csv_path = self.root / "kadid10k.csv"
-            self.dataset_root = self.root
+        # CSV 파일 확인 및 로드
+        scores_csv_path = os.path.join(self.root, "kadid10k.csv")
+        if not os.path.isfile(scores_csv_path):
+            raise FileNotFoundError(f"KADID10K CSV 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
 
-        # CSV 파일 로드
-        if not csv_path.is_file():
-            raise FileNotFoundError(f"CSV file not found: {csv_path}")
-        scores_csv = pd.read_csv(csv_path)
+        scores_csv = pd.read_csv(scores_csv_path)
+        self.images = scores_csv["dist_img"].values  # 추가된 부분
+        self.reference_images = scores_csv["ref_img"].values  # 추가된 부분
+        self.mos = scores_csv["dmos"].values  # 추가된 부분
 
         # 이미지 경로 설정
-        self.images = scores_csv["dist_img"].values
-        self.reference_images = scores_csv["ref_img"].values
-        self.mos = scores_csv["dmos"].values
-
-        # 정확한 경로로 수정
-        self.image_paths = [
-            str(self.dataset_root / "images" / img) for img in self.images
-        ]
-        self.reference_paths = [
-            str(self.dataset_root / "images" / img) for img in self.reference_images
-        ]
-
+        self.image_paths = [os.path.join(self.root, "images", img) for img in self.images]
+        self.reference_paths = [os.path.join(self.root, "images", img) for img in self.reference_images]
 
 
     def transform(self, image: Image) -> torch.Tensor:
@@ -474,17 +458,14 @@ class KADID10KDataset(Dataset):
             print(f"[Error] Loading image: {self.image_paths[index]} or {self.reference_paths[index]}: {e}")
             return None
 
-        # 동일한 왜곡 적용
         distortions = random.sample(list(self.distortion_levels.keys()), 1)
         levels = [random.choice(self.distortion_levels[distortions[0]])]
 
-        # 디버깅 로그 추가
-        #print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
+        print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
 
         img_A_distorted = self.apply_random_distortions(img_A_orig, distortions, levels)
         img_B_distorted = self.apply_random_distortions(img_B_orig, distortions, levels)
 
-        # Positive Pair 검증
         verify_positive_pairs(
             distortions_A=distortions[0],
             distortions_B=distortions[0],
@@ -502,7 +483,6 @@ class KADID10KDataset(Dataset):
             "img_B": torch.stack([img_B_orig, img_B_distorted]),
             "mos": torch.tensor(self.mos[index], dtype=torch.float32),
         }
-
     def __len__(self):
         return len(self.images)
 
