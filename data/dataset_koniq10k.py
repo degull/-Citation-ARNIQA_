@@ -1,41 +1,42 @@
-import os
 import pandas as pd
+import re
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
+from pathlib import Path
 import random
-import io
+import os
 from PIL import ImageEnhance, ImageFilter, Image
 import io
 
 # 왜곡 유형 매핑
 distortion_types_mapping = {
-    1: "gaussian_blur", #sobel o
-    2: "lens_blur", #sobel o
-    3: "motion_blur",   #sobel o
-    4: "color_diffusion",   #sobel o
-    5: "color_shift",   #sobel o
-    6: "color_quantization",    #sobel o
-    7: "color_saturation_1",    #HSV 색공간 분석
-    8: "color_saturation_2",    #HSV 색공간 분석
-    9: "jpeg2000",  #sobel o
-    10: "jpeg", #sobel o
-    11: "white_noise",  #sobel o
-    12: "white_noise_color_component",  #sobel o
-    13: "impulse_noise",    #sobel o
-    14: "multiplicative_noise", #sobel o
-    15: "denoise",  #Fourier Transform 
-    16: "brighten", #HSV 색공간 분석
-    17: "darken",   #HSV 색공간 분석
-    18: "mean_shift",   #히스토그램 분석
-    19: "jitter",   # Fourier Transform
-    20: "non_eccentricity_patch",   #sobel o
-    21: "pixelate", #sobel o
-    22: "quantization", #Fourier Transform
-    23: "color_block",  #Fourier Transform
-    24: "high_sharpen", #Fourier Transform
-    25: "contrast_change"   #Fourier Transform
+    1: "gaussian_blur",
+    2: "lens_blur",
+    3: "motion_blur",
+    4: "color_diffusion",
+    5: "color_shift",
+    6: "color_quantization",
+    7: "color_saturation_1",
+    8: "color_saturation_2",
+    9: "jpeg2000",
+    10: "jpeg",
+    11: "white_noise",
+    12: "white_noise_color_component",
+    13: "impulse_noise",
+    14: "multiplicative_noise",
+    15: "denoise",
+    16: "brighten",
+    17: "darken",
+    18: "mean_shift",
+    19: "jitter",
+    20: "non_eccentricity_patch",
+    21: "pixelate",
+    22: "quantization",
+    23: "color_block",
+    24: "high_sharpen",
+    25: "contrast_change"
 }
 
 # 강도 레벨 정의
@@ -45,7 +46,7 @@ def get_distortion_levels():
         'lens_blur': [1, 2, 3, 4, 5],
         'motion_blur': [1, 2, 3, 4, 5],
         'color_diffusion': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'color_shift': [10, 20, 30, 40, 50],
+        'color_shift': [10, 20, 30, 40, 50],  # 양수 값만 허용
         'jpeg2000': [0.1, 0.2, 0.3, 0.4, 0.5],
         'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
         'white_noise': [5, 10, 15, 20, 25],
@@ -53,9 +54,18 @@ def get_distortion_levels():
         'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5]
     }
 
+def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, applied_distortions_B):
+    print(f"[Debug] Verifying Positive Pairs:")
+    print(f" - Distortion A: {distortions_A}, Distortion B: {distortions_B}")
+    print(f" - Applied Level A: {applied_distortions_A}, Applied Level B: {applied_distortions_B}")
 
-class SPAQDataset(Dataset):
+    if distortions_A == distortions_B and applied_distortions_A == applied_distortions_B:
+        print(f"[Positive Pair Verification] Success: Distortions match.")
+    else:
+        print(f"[Positive Pair Verification] Error: Distortions do not match.")
 
+
+class KONIQ10KDataset:
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         super().__init__()
         self.root = str(root)
@@ -63,20 +73,17 @@ class SPAQDataset(Dataset):
         self.crop_size = crop_size
         self.distortion_levels = get_distortion_levels()
 
-        # 정확한 MOS 경로 확인 및 로드
-        scores_csv_path = os.path.join(self.root, "Annotations", "MOS and Image attribute scores.csv")
-        print(f"[Debug] Checking file at path: {scores_csv_path}")
-
+        # CSV 파일 확인 및 로드
+        scores_csv_path = os.path.join(self.root, "meta_info_KonIQ10kDataset.csv")
         if not os.path.isfile(scores_csv_path):
-            raise FileNotFoundError(f"MOS 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
+            raise FileNotFoundError(f"koniq CSV 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
 
         scores_csv = pd.read_csv(scores_csv_path)
-        self.images = scores_csv["Image name"].values
-        self.mos = scores_csv["MOS"].values
+        self.images = scores_csv["image_name"].values  # 수정된 부분
+        self.mos = scores_csv["MOS"].values  # MOS 값 로드
 
-        self.image_paths = [
-            os.path.join(self.root, "TestImage", img) for img in self.images
-        ]
+        # 이미지 경로 설정
+        self.image_paths = [os.path.join(self.root, "1024x768", img) for img in self.images]
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
@@ -239,7 +246,7 @@ class SPAQDataset(Dataset):
                 print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
                 continue
         return image
-    
+
 
     def __getitem__(self, index: int):
         try:
@@ -251,7 +258,7 @@ class SPAQDataset(Dataset):
         distortions = random.sample(list(self.distortion_levels.keys()), 1)
         levels = [random.choice(self.distortion_levels[distortions[0]])]
 
-        #print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
+        print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
 
         img_distorted = self.apply_random_distortions(img_orig, distortions, levels)
 
@@ -259,24 +266,22 @@ class SPAQDataset(Dataset):
         img_distorted = self.transform(img_distorted)
 
         return {
-            "img_A": img_orig,
-            "img_B": img_distorted,
+            "img": torch.stack([img_orig, img_distorted]),
             "mos": torch.tensor(self.mos[index], dtype=torch.float32),
         }
-
 
     def __len__(self):
         return len(self.images)
 
-# SPAQDataset 테스트
 if __name__ == "__main__":
-    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
-    dataset = SPAQDataset(root=dataset_path, phase="train", crop_size=224)
+    # Define paths
+    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
+    dataset = KONIQ10KDataset(root=dataset_path, phase="train", crop_size=224)
 
     print(f"Dataset size: {len(dataset)}")
 
+    # Fetch a sample
     sample = dataset[0]
     if sample:
         print(f"Sample keys: {sample.keys()}")
         print(f"MOS score: {sample['mos']}")
-        print(f"Image shape: {sample['img'].shape}")
