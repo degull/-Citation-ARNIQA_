@@ -29,20 +29,21 @@ class SimCLR(nn.Module):
         print(f"[Debug] inputs_A shape before ResNet: {inputs_A.shape}")
         print(f"[Debug] inputs_B shape before ResNet: {inputs_B.shape}")
 
-        # ResNet Backbone 통과
         features_A = self.backbone(inputs_A)
+        if isinstance(features_A, tuple):  # 튜플 처리
+            features_A = features_A[0]
         features_B = self.backbone(inputs_B)
+        if isinstance(features_B, tuple):  # 튜플 처리
+            features_B = features_B[0]
         print(f"[Debug] features_A shape after ResNet: {features_A.shape}")
         print(f"[Debug] features_B shape after ResNet: {features_B.shape}")
 
-        # Projection Head
         proj_A = self.projector(features_A)
         proj_B = self.projector(features_B)
         print(f"[Debug] proj_A shape after Projector: {proj_A.shape}")
         print(f"[Debug] proj_B shape after Projector: {proj_B.shape}")
 
         return proj_A, proj_B
-
 
 
     def compute_loss(self, proj_A, proj_B, proj_negatives):

@@ -50,7 +50,18 @@ def get_distortion_levels():
         'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
         'white_noise': [5, 10, 15, 20, 25],
         'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5]
+        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'denoise': [1, 2, 3, 4, 5],  # 강도 레벨 추가
+        'brighten': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'darken': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'mean_shift': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'jitter': [1, 2, 3, 4, 5],
+        'non_eccentricity_patch': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'pixelate': [1, 2, 3, 4, 5],
+        'quantization': [1, 2, 3, 4, 5],
+        'color_block': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'high_sharpen': [1, 2, 3, 4, 5],
+        'contrast_change': [0.1, 0.2, 0.3, 0.4, 0.5]
     }
 
 
@@ -267,6 +278,7 @@ class SPAQDataset(Dataset):
 
     def __len__(self):
         return len(self.images)
+
 
 # SPAQDataset 테스트
 if __name__ == "__main__":

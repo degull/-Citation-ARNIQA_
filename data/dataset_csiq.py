@@ -51,19 +51,19 @@ def get_distortion_levels():
         'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
         'white_noise': [5, 10, 15, 20, 25],
         'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5]
+        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'denoise': [1, 2, 3, 4, 5],  # 강도 레벨 추가
+        'brighten': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'darken': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'mean_shift': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'jitter': [1, 2, 3, 4, 5],
+        'non_eccentricity_patch': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'pixelate': [1, 2, 3, 4, 5],
+        'quantization': [1, 2, 3, 4, 5],
+        'color_block': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'high_sharpen': [1, 2, 3, 4, 5],
+        'contrast_change': [0.1, 0.2, 0.3, 0.4, 0.5]
     }
-
-# Positive Pair 검증 함수
-def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, applied_distortions_B):
-    print(f"[Debug] Verifying Positive Pairs:")
-    print(f" - Distortion A: {distortions_A}, Distortion B: {distortions_B}")
-    print(f" - Applied Level A: {applied_distortions_A}, Applied Level B: {applied_distortions_B}")
-
-    if distortions_A == distortions_B and applied_distortions_A == applied_distortions_B:
-        print(f"[Positive Pair Verification] Success: Distortions match.")
-    else:
-        print(f"[Positive Pair Verification] Error: Distortions do not match.")
 
 class CSIQDataset(Dataset):
     # 단일
@@ -113,7 +113,7 @@ class CSIQDataset(Dataset):
 
     def apply_distortion(self, image, distortion, level):
         try:
-            image = image.convert("RGB")  # Ensure the image is in RGB format
+            image = image.convert("RGB") 
 
             if distortion == "awgn":
                 image_array = np.array(image, dtype=np.float32)
@@ -283,12 +283,6 @@ class CSIQDataset(Dataset):
         img_A_distorted = self.apply_random_distortions(img_A_orig, distortions, levels)
         img_B_distorted = self.apply_random_distortions(img_B_orig, distortions, levels)
 
-        verify_positive_pairs(
-            distortions_A=distortions[0],
-            distortions_B=distortions[0],
-            applied_distortions_A=levels[0],
-            applied_distortions_B=levels[0],
-        )
 
         img_A_orig = self.transform(img_A_orig)
         img_B_orig = self.transform(img_B_orig)

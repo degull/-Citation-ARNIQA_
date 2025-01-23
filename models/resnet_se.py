@@ -13,19 +13,23 @@ from models.attention_se import DistortionAttention, HardNegativeCrossAttention
 class SEBlock(nn.Module):
     def __init__(self, in_channels, reduction=16):
         super(SEBlock, self).__init__()
-        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)  # Squeeze: 채널 별 전역 평균 계산
+        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Sequential(
-            nn.Linear(in_channels, in_channels // reduction, bias=False),   # 채널 축소
+            nn.Linear(in_channels, in_channels // reduction, bias=False),
             nn.ReLU(inplace=True),
-            nn.Linear(in_channels // reduction, in_channels, bias=False),   # 채널 복원
+            nn.Linear(in_channels // reduction, in_channels, bias=False),
             nn.Sigmoid()
         )
 
     def forward(self, x):
-        b, c, _, _ = x.size()   # (배치 크기, 채널, 높이, 너비)
-        y = self.global_avg_pool(x).view(b, c)  # Squeeze 단계
-        y = self.fc(y).view(b, c, 1, 1) # Excitation 단계
-        return x * y    # 입력 텐서와 채널 중요도 스칼라 곱
+        # 튜플 처리
+        if isinstance(x, tuple):
+            x = x[0]  # 첫 번째 요소를 사용
+        b, c, _, _ = x.size()
+        y = self.global_avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y
+
 
 
 class ResNetSE(nn.Module):
@@ -65,25 +69,35 @@ class ResNetSE(nn.Module):
         # Layer 1
         x = self.layer1(x)
         x = self.distortion_attention1(x)
+        if isinstance(x, tuple):  # 튜플 처리
+            x = x[0]
         x = self.se1(x)
         print(f"Layer1 output: {x.size()}")
 
         # Layer 2
         x = self.layer2(x)
         x = self.distortion_attention2(x)
+        if isinstance(x, tuple):  # 튜플 처리
+            x = x[0]
         x = self.se2(x)
         print(f"Layer2 output: {x.size()}")
 
         # Layer 3
         x = self.layer3(x)
         x = self.distortion_attention3(x)
+        if isinstance(x, tuple):  # 튜플 처리
+            x = x[0]
         x = self.se3(x)
         print(f"Layer3 output: {x.size()}")
 
         # Layer 4
         x = self.layer4(x)
         x_attr = self.distortion_attention4(x)
+        if isinstance(x_attr, tuple):  # 튜플 처리
+            x_attr = x_attr[0]
         x_texture = self.se4(x)
+        if isinstance(x_texture, tuple):  # 튜플 처리
+            x_texture = x_texture[0]
         print(f"Layer4 output (before attention): {x.size()}")
 
         x = self.hard_negative_attention(x_attr, x_texture)
@@ -93,7 +107,6 @@ class ResNetSE(nn.Module):
         x = self.global_avg_pool(x)
         print(f"Global Avg Pool output: {x.size()}")
         return x.view(x.size(0), -1)  # (batch_size, 2048)
-
 
 if __name__ == "__main__":
     x = torch.randn(32, 256, 28, 28)  # 배치 크기 32, 채널 256, 크기 28x28

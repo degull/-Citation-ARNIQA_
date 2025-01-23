@@ -46,44 +46,59 @@ def get_distortion_levels():
         'lens_blur': [1, 2, 3, 4, 5],
         'motion_blur': [1, 2, 3, 4, 5],
         'color_diffusion': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'color_shift': [10, 20, 30, 40, 50],  # 양수 값만 허용
+        'color_shift': [10, 20, 30, 40, 50],
         'jpeg2000': [0.1, 0.2, 0.3, 0.4, 0.5],
         'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
         'white_noise': [5, 10, 15, 20, 25],
         'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5]
+        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'denoise': [1, 2, 3, 4, 5],  # 강도 레벨 추가
+        'brighten': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'darken': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'mean_shift': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'jitter': [1, 2, 3, 4, 5],
+        'non_eccentricity_patch': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'pixelate': [1, 2, 3, 4, 5],
+        'quantization': [1, 2, 3, 4, 5],
+        'color_block': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'high_sharpen': [1, 2, 3, 4, 5],
+        'contrast_change': [0.1, 0.2, 0.3, 0.4, 0.5]
     }
-
-def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, applied_distortions_B):
-    print(f"[Debug] Verifying Positive Pairs:")
-    print(f" - Distortion A: {distortions_A}, Distortion B: {distortions_B}")
-    print(f" - Applied Level A: {applied_distortions_A}, Applied Level B: {applied_distortions_B}")
-
-    if distortions_A == distortions_B and applied_distortions_A == applied_distortions_B:
-        print(f"[Positive Pair Verification] Success: Distortions match.")
-    else:
-        print(f"[Positive Pair Verification] Error: Distortions do not match.")
 
 
 class KONIQ10KDataset:
-    def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
+    def __init__(self, root: str, phase: str = "all", crop_size: int = 224):
         super().__init__()
-        self.root = str(root)
-        self.phase = phase
-        self.crop_size = crop_size
-        self.distortion_levels = get_distortion_levels()
+        self.root = root  # Root path
+        self.phase = phase  # Phase (train/test/validation/all)
+        self.crop_size = crop_size  # Crop size
 
-        # CSV 파일 확인 및 로드
+        # CSV 파일 로드
         scores_csv_path = os.path.join(self.root, "meta_info_KonIQ10kDataset.csv")
         if not os.path.isfile(scores_csv_path):
-            raise FileNotFoundError(f"koniq CSV 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
+            raise FileNotFoundError(f"CSV 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
+        
+        scores_csv = pd.read_csv(scores_csv_path)  # CSV 파일 읽기
+        self.images = scores_csv["image_name"].values  # 이미지 파일명
+        self.mos = scores_csv["MOS"].values  # MOS 값
+        self.sets = scores_csv["set"].values  # train/test/validation 구분
 
-        scores_csv = pd.read_csv(scores_csv_path)
-        self.images = scores_csv["image_name"].values  # 수정된 부분
-        self.mos = scores_csv["MOS"].values  # MOS 값 로드
+        # 데이터 필터링 (phase="all"일 경우 필터링 생략)
+        if phase.lower() != "all":
+            self.indices = [
+                i for i, s in enumerate(self.sets) if s.strip().lower() == phase.strip().lower()
+            ]
+            self.images = [self.images[i] for i in self.indices]
+            self.mos = [self.mos[i] for i in self.indices]
+        else:
+            self.indices = list(range(len(self.images)))  # 모든 인덱스 포함
 
-        # 이미지 경로 설정
-        self.image_paths = [os.path.join(self.root, "1024x768", img) for img in self.images]
+        self.image_paths = [
+            os.path.join(self.root, "1024x768", self.images[i]) for i in range(len(self.images))
+        ]
+
+        print(f"[Debug] Phase: '{self.phase}'")
+        print(f"[Debug] Total Records: {len(self.image_paths)}")
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
@@ -249,38 +264,37 @@ class KONIQ10KDataset:
 
 
     def __getitem__(self, index: int):
-        try:
-            img_orig = Image.open(self.image_paths[index]).convert("RGB")
-        except Exception as e:
-            print(f"[Error] Loading image: {self.image_paths[index]}: {e}")
-            return None
+        # 이미지 로드
+        image_path = self.image_paths[index]
+        mos = self.mos[index]
 
-        distortions = random.sample(list(self.distortion_levels.keys()), 1)
-        levels = [random.choice(self.distortion_levels[distortions[0]])]
+        if not os.path.exists(image_path):
+            print(f"[Warning] Image not found: {image_path}. Skipping.")
+            return None  # 누락된 이미지를 건너뛰기
 
-        print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
 
-        img_distorted = self.apply_random_distortions(img_orig, distortions, levels)
+        img = Image.open(image_path).convert("RGB")
+        transform = transforms.Compose([
+            transforms.Resize((self.crop_size, self.crop_size)),
+            transforms.ToTensor(),
+        ])
+        img = transform(img)
 
-        img_orig = self.transform(img_orig)
-        img_distorted = self.transform(img_distorted)
-
-        return {
-            "img": torch.stack([img_orig, img_distorted]),
-            "mos": torch.tensor(self.mos[index], dtype=torch.float32),
-        }
-
+        return {"img": img, "mos": torch.tensor(mos, dtype=torch.float32)}
+    
     def __len__(self):
-        return len(self.images)
+        return len(self.image_paths)
+
+
+
+
 
 if __name__ == "__main__":
-    # Define paths
     dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
-    dataset = KONIQ10KDataset(root=dataset_path, phase="train", crop_size=224)
+    dataset = KONIQ10KDataset(root=dataset_path, phase="training", crop_size=224)
+
 
     print(f"Dataset size: {len(dataset)}")
-
-    # Fetch a sample
     sample = dataset[0]
     if sample:
         print(f"Sample keys: {sample.keys()}")

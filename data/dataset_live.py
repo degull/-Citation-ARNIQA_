@@ -45,12 +45,23 @@ def get_distortion_levels():
         'lens_blur': [1, 2, 3, 4, 5],
         'motion_blur': [1, 2, 3, 4, 5],
         'color_diffusion': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'color_shift': [10, 20, 30, 40, 50],  # 양수 값만 허용
+        'color_shift': [10, 20, 30, 40, 50],
         'jpeg2000': [0.1, 0.2, 0.3, 0.4, 0.5],
         'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
         'white_noise': [5, 10, 15, 20, 25],
         'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5]
+        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'denoise': [1, 2, 3, 4, 5],  # 강도 레벨 추가
+        'brighten': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'darken': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'mean_shift': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'jitter': [1, 2, 3, 4, 5],
+        'non_eccentricity_patch': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'pixelate': [1, 2, 3, 4, 5],
+        'quantization': [1, 2, 3, 4, 5],
+        'color_block': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'high_sharpen': [1, 2, 3, 4, 5],
+        'contrast_change': [0.1, 0.2, 0.3, 0.4, 0.5]
     }
 
 
@@ -83,7 +94,18 @@ class LIVEDataset(Dataset):
             'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
             'white_noise': [5, 10, 15, 20, 25],
             'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
-            'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5]
+            'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5],
+            'denoise': [1, 2, 3, 4, 5],  # 강도 레벨 추가
+            'brighten': [0.1, 0.2, 0.3, 0.4, 0.5],
+            'darken': [0.1, 0.2, 0.3, 0.4, 0.5],
+            'mean_shift': [0.1, 0.2, 0.3, 0.4, 0.5],
+            'jitter': [1, 2, 3, 4, 5],
+            'non_eccentricity_patch': [0.1, 0.2, 0.3, 0.4, 0.5],
+            'pixelate': [1, 2, 3, 4, 5],
+            'quantization': [1, 2, 3, 4, 5],
+            'color_block': [0.1, 0.2, 0.3, 0.4, 0.5],
+            'high_sharpen': [1, 2, 3, 4, 5],
+            'contrast_change': [0.1, 0.2, 0.3, 0.4, 0.5]
         }
 
         # CSV 파일 로드
