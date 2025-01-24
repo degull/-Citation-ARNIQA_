@@ -328,7 +328,7 @@ class TID2013Dataset(Dataset):
 
     # TID2013Dataset 테스트
 if __name__ == "__main__":
-    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013/mos.csv"
+    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013/"
     dataset = TID2013Dataset(root=dataset_path, phase="train", crop_size=224)
 
     print(f"Dataset size: {len(dataset)}")

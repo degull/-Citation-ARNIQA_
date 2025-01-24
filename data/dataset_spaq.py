@@ -5,40 +5,10 @@ import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
 import random
-import io
-from PIL import ImageEnhance, ImageFilter, Image
+from PIL import Image, ImageFilter, ImageEnhance
 import io
 
-# 왜곡 유형 매핑
-distortion_types_mapping = {
-    1: "gaussian_blur", #sobel o
-    2: "lens_blur", #sobel o
-    3: "motion_blur",   #sobel o
-    4: "color_diffusion",   #sobel o
-    5: "color_shift",   #sobel o
-    6: "color_quantization",    #sobel o
-    7: "color_saturation_1",    #HSV 색공간 분석
-    8: "color_saturation_2",    #HSV 색공간 분석
-    9: "jpeg2000",  #sobel o
-    10: "jpeg", #sobel o
-    11: "white_noise",  #sobel o
-    12: "white_noise_color_component",  #sobel o
-    13: "impulse_noise",    #sobel o
-    14: "multiplicative_noise", #sobel o
-    15: "denoise",  #Fourier Transform 
-    16: "brighten", #HSV 색공간 분석
-    17: "darken",   #HSV 색공간 분석
-    18: "mean_shift",   #히스토그램 분석
-    19: "jitter",   # Fourier Transform
-    20: "non_eccentricity_patch",   #sobel o
-    21: "pixelate", #sobel o
-    22: "quantization", #Fourier Transform
-    23: "color_block",  #Fourier Transform
-    24: "high_sharpen", #Fourier Transform
-    25: "contrast_change"   #Fourier Transform
-}
-
-# 강도 레벨 정의
+# 왜곡 유형 매핑 및 강도 레벨 정의
 def get_distortion_levels():
     return {
         'gaussian_blur': [1, 2, 3, 4, 5],
@@ -51,7 +21,7 @@ def get_distortion_levels():
         'white_noise': [5, 10, 15, 20, 25],
         'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
         'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'denoise': [1, 2, 3, 4, 5],  # 강도 레벨 추가
+        'denoise': [1, 2, 3, 4, 5],
         'brighten': [0.1, 0.2, 0.3, 0.4, 0.5],
         'darken': [0.1, 0.2, 0.3, 0.4, 0.5],
         'mean_shift': [0.1, 0.2, 0.3, 0.4, 0.5],
@@ -64,22 +34,17 @@ def get_distortion_levels():
         'contrast_change': [0.1, 0.2, 0.3, 0.4, 0.5]
     }
 
-
 class SPAQDataset(Dataset):
-
-    def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
+    def __init__(self, root: str, crop_size: int = 224):
         super().__init__()
         self.root = str(root)
-        self.phase = phase
         self.crop_size = crop_size
         self.distortion_levels = get_distortion_levels()
 
-        # 정확한 MOS 경로 확인 및 로드
+        # CSV 파일 로드
         scores_csv_path = os.path.join(self.root, "Annotations", "MOS and Image attribute scores.csv")
-        print(f"[Debug] Checking file at path: {scores_csv_path}")
-
         if not os.path.isfile(scores_csv_path):
-            raise FileNotFoundError(f"MOS 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
+            raise FileNotFoundError(f"CSV 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
 
         scores_csv = pd.read_csv(scores_csv_path)
         self.images = scores_csv["Image name"].values
@@ -88,6 +53,12 @@ class SPAQDataset(Dataset):
         self.image_paths = [
             os.path.join(self.root, "TestImage", img) for img in self.images
         ]
+
+        # 기본 변환 정의
+        self.transform = transforms.Compose([
+            transforms.Resize((self.crop_size, self.crop_size)),
+            transforms.ToTensor(),
+        ])
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
@@ -247,7 +218,7 @@ class SPAQDataset(Dataset):
             try:
                 image = self.apply_distortion(image, distortion, level)
             except Exception as e:
-                print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
+                #print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
                 continue
         return image
     
@@ -262,8 +233,6 @@ class SPAQDataset(Dataset):
         distortions = random.sample(list(self.distortion_levels.keys()), 1)
         levels = [random.choice(self.distortion_levels[distortions[0]])]
 
-        #print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
-
         img_distorted = self.apply_random_distortions(img_orig, distortions, levels)
 
         img_orig = self.transform(img_orig)
@@ -275,7 +244,6 @@ class SPAQDataset(Dataset):
             "mos": torch.tensor(self.mos[index], dtype=torch.float32),
         }
 
-
     def __len__(self):
         return len(self.images)
 
@@ -283,7 +251,7 @@ class SPAQDataset(Dataset):
 # SPAQDataset 테스트
 if __name__ == "__main__":
     dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
-    dataset = SPAQDataset(root=dataset_path, phase="train", crop_size=224)
+    dataset = SPAQDataset(root=dataset_path, crop_size=224)
 
     print(f"Dataset size: {len(dataset)}")
 
@@ -291,4 +259,5 @@ if __name__ == "__main__":
     if sample:
         print(f"Sample keys: {sample.keys()}")
         print(f"MOS score: {sample['mos']}")
-        print(f"Image shape: {sample['img'].shape}")
+        print(f"Image A shape: {sample['img_A'].shape}")
+        print(f"Image B shape: {sample['img_B'].shape}")

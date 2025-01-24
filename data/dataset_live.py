@@ -51,7 +51,7 @@ def get_distortion_levels():
         'white_noise': [5, 10, 15, 20, 25],
         'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
         'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'denoise': [1, 2, 3, 4, 5],  # 강도 레벨 추가
+        'denoise': [1, 2, 3, 4, 5],
         'brighten': [0.1, 0.2, 0.3, 0.4, 0.5],
         'darken': [0.1, 0.2, 0.3, 0.4, 0.5],
         'mean_shift': [0.1, 0.2, 0.3, 0.4, 0.5],
@@ -64,49 +64,14 @@ def get_distortion_levels():
         'contrast_change': [0.1, 0.2, 0.3, 0.4, 0.5]
     }
 
-
-
-def verify_positive_pairs(distortions_A, distortions_B, applied_distortions_A, applied_distortions_B):
-    print(f"[Debug] Verifying Positive Pairs:")
-    print(f" - Distortion A: {distortions_A}, Distortion B: {distortions_B}")
-    print(f" - Applied Level A: {applied_distortions_A}, Applied Level B: {applied_distortions_B}")
-
-    if distortions_A == distortions_B and applied_distortions_A == applied_distortions_B:
-        print(f"[Positive Pair Verification] Success: Distortions match.")
-    else:
-        print(f"[Positive Pair Verification] Error: Distortions do not match.")
-
 # LIVE Dataset
 class LIVEDataset(Dataset):
-    def __init__(self, root: str, crop_size: int = 224):
+    def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         super().__init__()
-        self.root = root
+        self.root = str(root)
+        self.phase = phase  # 추가
         self.crop_size = crop_size
-
-        # 왜곡 유형 및 강도 레벨 정의
-        self.distortion_levels = {
-            'gaussian_blur': [1, 2, 3, 4, 5],
-            'lens_blur': [1, 2, 3, 4, 5],
-            'motion_blur': [1, 2, 3, 4, 5],
-            'color_diffusion': [0.05, 0.1, 0.2, 0.3, 0.4],
-            'color_shift': [10, 20, 30, 40, 50],
-            'jpeg2000': [0.1, 0.2, 0.3, 0.4, 0.5],
-            'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
-            'white_noise': [5, 10, 15, 20, 25],
-            'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
-            'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5],
-            'denoise': [1, 2, 3, 4, 5],  # 강도 레벨 추가
-            'brighten': [0.1, 0.2, 0.3, 0.4, 0.5],
-            'darken': [0.1, 0.2, 0.3, 0.4, 0.5],
-            'mean_shift': [0.1, 0.2, 0.3, 0.4, 0.5],
-            'jitter': [1, 2, 3, 4, 5],
-            'non_eccentricity_patch': [0.1, 0.2, 0.3, 0.4, 0.5],
-            'pixelate': [1, 2, 3, 4, 5],
-            'quantization': [1, 2, 3, 4, 5],
-            'color_block': [0.1, 0.2, 0.3, 0.4, 0.5],
-            'high_sharpen': [1, 2, 3, 4, 5],
-            'contrast_change': [0.1, 0.2, 0.3, 0.4, 0.5]
-        }
+        self.distortion_levels = get_distortion_levels()
 
         # CSV 파일 로드
         csv_path = os.path.join(self.root, "LIVE_Challenge.txt")
@@ -126,6 +91,7 @@ class LIVEDataset(Dataset):
             transforms.ToTensor(),
         ])
 
+
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
             transforms.Resize((self.crop_size, self.crop_size)),
@@ -134,8 +100,7 @@ class LIVEDataset(Dataset):
 
     def apply_distortion(self, image, distortion, level):
         try:
-            image = image.convert("RGB")  # Ensure the image is in RGB format
-
+            image = image.convert("RGB") 
             if distortion == "gaussian_blur":
                 image = image.filter(ImageFilter.GaussianBlur(radius=level))
 
@@ -274,7 +239,6 @@ class LIVEDataset(Dataset):
         return image
 
     
-    
     def apply_random_distortion(self, image, distortions=None, levels=None):
         if distortions is None:
             distortions = random.sample(list(self.distortion_levels.keys()), 1)
@@ -292,36 +256,42 @@ class LIVEDataset(Dataset):
 
     def __getitem__(self, index: int):
         try:
-            img_orig = Image.open(self.image_paths[index]).convert("RGB")
+            img_A_orig = Image.open(self.image_paths[index]).convert("RGB")
         except Exception as e:
             print(f"[Error] Loading image: {self.image_paths[index]}: {e}")
             return None
 
-        # 원본 이미지 변환
-        img_A = self.transform(img_orig)
+        # 동일한 왜곡 적용
+        distortions = random.sample(list(self.distortion_levels.keys()), 1)
+        levels = [random.choice(self.distortion_levels[distortions[0]])]
 
-        # 왜곡 이미지 생성 및 변환
-        img_B = self.apply_random_distortion(img_orig)
-        img_B = self.transform(img_B)
+        # 디버깅 로그 추가
+        print(f"[Debug] Selected Distortion: {distortions[0]}, Level: {levels[0]}")
 
-        # MOS 점수
-        mos = torch.tensor(self.mos[index], dtype=torch.float32)
+        img_A_distorted = self.apply_random_distortion(img_A_orig, distortions, levels)
+
+        img_A_orig = self.transform(img_A_orig)
+        img_A_distorted = self.transform(img_A_distorted)
 
         return {
-            "img_A": img_A,
-            "img_B": img_B,
-            "mos": mos,
+            "img_A": torch.stack([img_A_orig, img_A_distorted]),
+            "mos": torch.tensor(self.mos[index], dtype=torch.float32),
         }
+
 
     def __len__(self):
         return len(self.image_paths)
 
-# Example Usage
+
 if __name__ == "__main__":
-    dataset = LIVEDataset(root="E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE")
+    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE/"
+    dataset = LIVEDataset(root=dataset_path, phase="train", crop_size=224)
+
     print(f"Dataset size: {len(dataset)}")
 
+    # 첫 번째 데이터 항목 가져오기
     sample = dataset[0]
-    if sample is not None:
-        print(f"Sample Image Shape: {sample['img'].shape}")
-        print(f"MOS Score: {sample['mos']}")
+    if sample:
+        print(f"Sample keys: {sample.keys()}")
+        print(f"MOS score: {sample['mos']}")
+        print(f"Image A shape: {sample['img_A'].shape}")

@@ -98,39 +98,7 @@ class KADID10KDataset:
         try:
             image = image.convert("RGB")  # Ensure the image is in RGB format
 
-            if distortion == "awgn":
-                image_array = np.array(image, dtype=np.float32)
-                noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
-                noisy_image = image_array + noise
-                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
-                image = Image.fromarray(noisy_image)
-
-            elif distortion == "blur":
-                image = image.filter(ImageFilter.GaussianBlur(radius=level))
-
-            elif distortion == "contrast":
-                enhancer = ImageEnhance.Contrast(image)
-                image = enhancer.enhance(level)
-
-            elif distortion == "jpeg2000":
-                image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
-
-            elif distortion == "jpeg":
-                quality = max(1, min(100, int(100 - (level * 100))))
-                buffer = io.BytesIO()
-                image.save(buffer, format="JPEG", quality=quality)
-                buffer.seek(0)
-                return Image.open(buffer)
-
-            elif distortion == "fnoise":
-                image_array = np.array(image, dtype=np.float32)
-                noise = np.random.normal(0, level * 255, image_array.shape).astype(np.float32)
-                noisy_image = image_array + noise
-                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
-                image = Image.fromarray(noisy_image)
-
-            # Additional distortions from TID2013
-            elif distortion == "gaussian_blur":
+            if distortion == "gaussian_blur":
                 image = image.filter(ImageFilter.GaussianBlur(radius=level))
 
             elif distortion == "lens_blur":
@@ -141,9 +109,17 @@ class KADID10KDataset:
 
             elif distortion == "color_diffusion":
                 diffused = np.array(image).astype(np.float32)
+                
+                # 색상 확산을 위한 무작위 값 생성
                 diffusion = np.random.uniform(-level * 255, level * 255, size=diffused.shape).astype(np.float32)
+                
+                # 색상 확산 적용
                 diffused += diffusion
+                
+                # 값 클리핑 (0~255 범위로 제한)
                 diffused = np.clip(diffused, 0, 255).astype(np.uint8)
+
+                # 다시 PIL 이미지로 변환
                 image = Image.fromarray(diffused)
 
             elif distortion == "color_shift":
@@ -152,28 +128,53 @@ class KADID10KDataset:
                 shifted += shift_amount
                 image = Image.fromarray(np.clip(shifted, 0, 255).astype(np.uint8))
 
+            elif distortion == "jpeg2000":
+                image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
+
+            elif distortion == "jpeg":
+                # JPEG 품질 수준은 1 ~ 100의 정수로 설정
+                quality = max(1, min(100, int(100 - (level * 100))))
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG", quality=quality)
+                buffer.seek(0)
+                return Image.open(buffer)
+
             elif distortion == "white_noise":
+                # 이미지를 numpy 배열로 변환 (float32로)
                 image_array = np.array(image, dtype=np.float32)
+                
+                # 노이즈 생성 (가우시안 노이즈)
                 noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
+                
+                # 원본 이미지에 노이즈 추가
                 noisy_image = image_array + noise
+                
+                # 값 클리핑 (0~255 범위로 제한)
                 noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+                
+                # 디버깅: noise와 noisy_image 값 확인
+                print("White Noise Debug:")
+                print("Noise min/max:", noise.min(), noise.max())
+                print("Noisy Image min/max:", noisy_image.min(), noisy_image.max())
+                
+                # 다시 PIL 이미지로 변환
                 image = Image.fromarray(noisy_image)
 
             elif distortion == "impulse_noise":
-                image_array = np.array(image).astype(np.float32)
+                image_array = np.array(image).astype(np.float32)  # NumPy 배열로 변환
                 prob = level
                 mask = np.random.choice([0, 1], size=image_array.shape[:2], p=[1 - prob, prob])
                 random_noise = np.random.choice([0, 255], size=(image_array.shape[0], image_array.shape[1], 1))
                 image_array[mask == 1] = random_noise[mask == 1]
                 image_array = np.clip(image_array, 0, 255).astype(np.uint8)
-                image = Image.fromarray(image_array)
+                return Image.fromarray(image_array)
 
             elif distortion == "multiplicative_noise":
-                image_array = np.array(image).astype(np.float32)
-                noise = np.random.normal(1, level, image_array.shape)
+                image_array = np.array(image).astype(np.float32)  # NumPy 배열로 변환
+                noise = np.random.normal(1, level, image_array.shape)  # 1을 기준으로 곱셈 노이즈 생성
                 noisy_image = image_array * noise
-                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
-                image = Image.fromarray(noisy_image)
+                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)  # 0~255로 클리핑
+                return Image.fromarray(noisy_image)
 
             elif distortion == "denoise":
                 image = image.filter(ImageFilter.MedianFilter(size=int(level)))
@@ -235,8 +236,6 @@ class KADID10KDataset:
         return image
 
 
-    
-    
     def apply_random_distortions(self, image, distortions=None, levels=None):
         if distortions is None:
             distortions = random.sample(list(self.distortion_levels.keys()), 1)
@@ -244,13 +243,14 @@ class KADID10KDataset:
             levels = [random.choice(self.distortion_levels[distortion]) for distortion in distortions]
 
         for distortion, level in zip(distortions, levels):
-            #print(f"[Debug] Applying distortion: {distortion} with level: {level}")
+            print(f"[Debug] Applying distortion: {distortion} with level: {level}")
             try:
                 image = self.apply_distortion(image, distortion, level)
             except Exception as e:
                 print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
                 continue
         return image
+
 
     def __getitem__(self, index: int):
         try:
