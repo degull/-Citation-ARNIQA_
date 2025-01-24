@@ -106,6 +106,7 @@ class KONIQ10KDataset(Dataset):
             transforms.ToTensor(),
         ])
 
+
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
             transforms.Resize((self.crop_size, self.crop_size)),
@@ -291,14 +292,12 @@ class KONIQ10KDataset(Dataset):
             "img_B": img_distorted,
             "mos": torch.tensor(mos, dtype=torch.float32),
         }
+
     
     def __len__(self):
         return len(self.image_paths)
 
 
-
-
-# 테스트 코드
 if __name__ == "__main__":
     dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
     dataset = KONIQ10KDataset(root=dataset_path, phase="training", crop_size=224)
