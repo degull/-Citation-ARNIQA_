@@ -2562,7 +2562,7 @@ if __name__ == "__main__":
 # ------------------------------------------- cross dataset --------------------------
 
 # Train(KADID) & Test(TID2013)
-import io
+""" import io
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -2832,7 +2832,7 @@ if __name__ == "__main__":
         avg_plcc = np.mean(metrics['plcc'])
         print(f"Epoch {i}: SRCC = {avg_srcc:.4f}, PLCC = {avg_plcc:.4f}")
 
-
+ """
 
 # Train(KADID10K) & Test(TID2013)
 # Test Results on TID2013 Dataset: SRCC = 0.9446, PLCC = 0.9501
