@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from torchvision.models import resnet50
 from models.attention_se import DistortionAttention, HardNegativeCrossAttention
+from utils.utils_visualization import visualize_feature_maps
 
 class SEBlock(nn.Module):
     def __init__(self, in_channels, reduction=16):
@@ -107,6 +108,78 @@ class ResNetSE(nn.Module):
         x = self.global_avg_pool(x)
         print(f"Global Avg Pool output: {x.size()}")
         return x.view(x.size(0), -1)  # (batch_size, 2048)
+
+
+class ResNetSEVisualizer(nn.Module):
+    def __init__(self, base_model, distortion_attentions, hard_negative_attention, se_blocks):
+        super(ResNetSEVisualizer, self).__init__()
+
+        # 🔥 ResNet은 layer0이 없으므로 직접 생성해야 함
+        self.layer0 = nn.Sequential(
+            base_model.conv1,
+            base_model.bn1,
+            base_model.relu,
+            base_model.maxpool
+        )
+
+        self.layer1 = base_model.layer1
+        self.layer2 = base_model.layer2
+        self.layer3 = base_model.layer3
+        self.layer4 = base_model.layer4
+
+        self.distortion_attention1, self.distortion_attention2, self.distortion_attention3, self.distortion_attention4 = distortion_attentions
+        self.se1, self.se2, self.se3, self.se4 = se_blocks
+        self.hard_negative_attention = hard_negative_attention
+        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+
+    def forward(self, x, original_image):
+        """
+        :param x: 입력 이미지 텐서
+        :param original_image: 원본 이미지 (PIL or numpy)
+        """
+        activation_maps = {}
+
+        # Layer 0 (Conv + MaxPool)
+        x = self.layer0(x)
+        activation_maps["Layer0"] = x
+
+        # Layer 1
+        x = self.layer1(x)
+        x = self.distortion_attention1(x)[0]  # Distortion Attention 적용
+        x = self.se1(x)
+        activation_maps["Layer1"] = x
+
+        # Layer 2
+        x = self.layer2(x)
+        x = self.distortion_attention2(x)[0]
+        x = self.se2(x)
+        activation_maps["Layer2"] = x
+
+        # Layer 3
+        x = self.layer3(x)
+        x = self.distortion_attention3(x)[0]
+        x = self.se3(x)
+        activation_maps["Layer3"] = x
+
+        # Layer 4 (Before Attention)
+        x = self.layer4(x)
+        activation_maps["Layer4_before_attention"] = x
+
+        # Distortion Attention & SE
+        x_attr = self.distortion_attention4(x)[0]
+        x_texture = self.se4(x)
+        activation_maps["Layer4_after_attention"] = x_attr
+
+        # Hard Negative Cross Attention
+        x = self.hard_negative_attention(x_attr, x_texture)
+        activation_maps["HardNegativeCrossAttention"] = x
+
+        # Global Avg Pooling 적용 후 벡터 출력
+        x = self.global_avg_pool(x)
+        activation_maps["GlobalAvgPool"] = x
+
+        return activation_maps
+
 
 if __name__ == "__main__":
     x = torch.randn(32, 256, 28, 28)  # 배치 크기 32, 채널 256, 크기 28x28

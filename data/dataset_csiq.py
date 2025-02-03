@@ -267,6 +267,8 @@ class CSIQDataset(Dataset):
                 print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
                 continue
         return image
+
+    
     
     def __getitem__(self, index: int):
         try:
@@ -283,7 +285,6 @@ class CSIQDataset(Dataset):
 
         img_A_distorted = self.apply_random_distortions(img_A_orig, distortions, levels)
         img_B_distorted = self.apply_random_distortions(img_B_orig, distortions, levels)
-
 
         img_A_orig = self.transform(img_A_orig)
         img_B_orig = self.transform(img_B_orig)

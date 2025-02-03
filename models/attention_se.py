@@ -46,9 +46,9 @@ class DistortionClassifier(nn.Module):
     def __init__(self, in_channels, num_distortions=25):
         super(DistortionClassifier, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1))
         )

@@ -279,6 +279,7 @@ class KADID10KDataset:
             "img_B": torch.stack([img_B_orig, img_B_distorted]),
             "mos": torch.tensor(self.mos[index], dtype=torch.float32),
         }
+    
     def __len__(self):
         return len(self.images)
 
