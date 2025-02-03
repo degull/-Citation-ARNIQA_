@@ -13,37 +13,67 @@ from PIL import ImageEnhance, ImageFilter, Image
 import matplotlib.pyplot as plt
 from torchvision import transforms
 
-# Distortion name to number mapping
+
 distortion_map = {
-    "gaussian_blur": 0,  # Sobel 필터
-    "lens_blur": 1,  # Sobel 필터
-    "motion_blur": 2,  # Sobel 필터
-    "color_diffusion": 3,  # Sobel 필터
-    "color_shift": 4,  # Sobel 필터
-    "color_quantization": 5,  # Sobel 필터
-    "color_saturation_1": 6,  # HSV 색공간 분석
-    "color_saturation_2": 7,  # HSV 색공간 분석
-    "jpeg2000": 8,  # Sobel 필터
-    "jpeg": 9,  # Sobel 필터
-    "white_noise": 10,  # Sobel 필터
-    "white_noise_color_component": 11,  # Sobel 필터
-    "impulse_noise": 12,  # Sobel 필터
-    "multiplicative_noise": 13,  # Sobel 필터
-    "denoise": 14,  # Fourier Transform
-    "brighten": 15,  # HSV 색공간 분석
-    "darken": 16,  # HSV 색공간 분석
-    "mean_shift": 17,  # 히스토그램 분석
-    "jitter": 18,  # Fourier Transform
-    "non_eccentricity_patch": 19,  # Sobel 필터
-    "pixelate": 20,  # Sobel 필터
-    "quantization": 21,  # Fourier Transform
-    "color_block": 22,  # Fourier Transform
-    "high_sharpen": 23,  # Fourier Transform
-    "contrast_change": 24  # Fourier Transform
+    "jpeg": 0,  # Sobel
+    "jpeg2000": 1,    #Sobel
+    "gaussian_blur": 2, #Sobel
+    "white_noise": 3,   #Sobel
+    "contrast_change": 4,  #HSV
+
+    "fast_fading": 5,  #Fourier
+    "awgn": 6,   #Sobel
+    "blur": 7,   #Sobel
+    "contrast": 8, #HSV
+    "fnoise": 9,   #Fourier
+
+    "brightness": 10,  #HSV
+    "colorfulness": 11,    #HSV
+    "sharpness": 12, #Sobel
+    "exposure": 13,     #HSV
+
+    "lens_blur": 14,  #Sobel
+    "motion_blur": 15,    #Sobel
+    "color_diffusion": 16,    #Sobel
+    "color_shift": 17,  #HSV
+
+    "impulse_noise": 18,  #Sobel
+    "multiplicative_noise": 19,     #Fourier
+    "denoise": 20,  #Fourier
+    "mean_shift": 21,  #Histogram
+    "jitter": 22,  #Fourier
+    "non_eccentricity_patch": 23,     #Sobel
+    "pixelate": 24,   #Sobel
+    "quantization": 25,     #Fourier
+    "color_block": 26,  #Fourier
+    "high_sharpen":27,     #Fourier
+
+    "spatial_noise": 28,  #Sobel
+    "color_saturation": 29,     #HSV
+    "color_quantization": 30,   #Fourier
+    "overexposure": 31,     #HSV
+    "underexposure": 32,    #HSV
+    "chromatic_aberration": 33,   #Sobel
+
+    "additive_gaussian_noise": 34,    #Sobel
+    "additive_noise_in_color_components": 35,    #Sobel
+    "spatially_correlated_noise": 36,     #Sobel
+    "masked_noise": 37,   #Sobel
+    "high_frequency_noise": 38,   #Sobel
+    "image_denoising": 39,  #Fourier
+    "jpeg_transmission_errors": 40,   #Sobel
+    "jpeg2000_transmission_errors": 41,   #Sobel
+    "non_eccentricity_pattern_noise": 42,     #Sobel
+    "local_block_wise_distortions": 43,  #Sobel
+    "comfort_noise": 44,    #Fourier
+    "lossy_compression_of_noisy_images": 45,    #Fourier
+    "image_color_quantization_with_dither": 46,     #Fourier
+    "sparse_sampling_and_reconstruction": 47,   #Fourier
 }
 
+
 class DistortionClassifier(nn.Module):
-    def __init__(self, in_channels, num_distortions=25):
+    def __init__(self, in_channels, num_distortions=48):
         super(DistortionClassifier, self).__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1),
@@ -91,7 +121,6 @@ class TextureBlockProcessor(nn.Module):
     def forward(self, x):
         return self.conv(x)
 
-
 class DistortionAttention(nn.Module):
     def __init__(self, in_channels):
         super(DistortionAttention, self).__init__()
@@ -118,16 +147,17 @@ class DistortionAttention(nn.Module):
         if isinstance(distortion_type, str):
             distortion_type = distortion_map.get(distortion_type, -1)
 
-        if distortion_type in [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 19, 20]:  # Sobel applicable distortions
+        if distortion_type in [0, 1, 2, 3, 6, 7, 12, 14, 15, 16, 18, 23, 24, 28, 33, 34, 35, 36, 37, 38, 40, 41, 42, 43]:  # Sobel applicable distortions
             return self._sobel_filter(x)
-        elif distortion_type in [6, 7, 15, 16]:  # HSV analysis applicable distortions
+        elif distortion_type in [4, 8, 10, 11, 13, 17, 29, 31, 32]:  # HSV analysis applicable distortions
             return self._hsv_analysis(x)
-        elif distortion_type == 17:  # Histogram analysis applicable distortions
+        elif distortion_type == 21:  # Histogram analysis applicable distortions
             return self._histogram_analysis(x)
-        elif distortion_type in [14, 18, 21, 22, 23, 24]:  # Fourier Transform applicable distortions
+        elif distortion_type in [5, 9, 19, 20, 22, 25, 26, 27, 30, 39, 44, 45, 46, 47]:  # Fourier Transform applicable distortions
             return self._fourier_analysis(x)
         else:
             return torch.ones_like(x[:, :1, :, :])
+
 
     def _sobel_filter(self, x):
         sobel_x = self.sobel_x.repeat(x.size(1), 1, 1, 1).to(x.device)  # Repeat for each input channel
@@ -176,7 +206,7 @@ class DistortionAttention(nn.Module):
         saturation = delta / (max_rgb + 1e-6)
         value = max_rgb
         return torch.cat((delta, saturation, value), dim=1)
-
+    
 
 class HardNegativeCrossAttention(nn.Module):
     def __init__(self, in_channels, num_heads=8):
@@ -239,13 +269,18 @@ class HardNegativeCrossAttention(nn.Module):
 # 시각화 함수
 def visualize_distortion_classification(input_image, distortion_logits):
     distortion_probs = torch.softmax(distortion_logits, dim=1).detach().cpu().numpy()[0]
-    distortion_labels = list(distortion_map.keys())
+
+    # distortion_labels 크기를 distortion_probs 개수와 맞춤
+    distortion_labels = list(distortion_map.keys())[:len(distortion_probs)]  # 개수 일치
+
     plt.figure(figsize=(12, 6))
+    
     # 입력 이미지 시각화
     plt.subplot(1, 2, 1)
     plt.imshow(input_image)
     plt.title("Input Image")
     plt.axis("off")
+
     # 왜곡 분류 결과 시각화
     plt.subplot(1, 2, 2)
     plt.bar(distortion_labels, distortion_probs)
@@ -253,8 +288,6 @@ def visualize_distortion_classification(input_image, distortion_logits):
     plt.xticks(rotation=90)
     plt.tight_layout()
     plt.show()
-
-
 
 
 # Main Execution for Debugging

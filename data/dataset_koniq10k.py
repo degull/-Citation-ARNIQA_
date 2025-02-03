@@ -12,57 +12,23 @@ import io
 
 # 왜곡 유형 매핑
 distortion_types_mapping = {
-    1: "gaussian_blur",
-    2: "lens_blur",
-    3: "motion_blur",
-    4: "color_diffusion",
-    5: "color_shift",
-    6: "color_quantization",
-    7: "color_saturation_1",
-    8: "color_saturation_2",
-    9: "jpeg2000",
-    10: "jpeg",
-    11: "white_noise",
-    12: "white_noise_color_component",
-    13: "impulse_noise",
-    14: "multiplicative_noise",
-    15: "denoise",
-    16: "brighten",
-    17: "darken",
-    18: "mean_shift",
-    19: "jitter",
-    20: "non_eccentricity_patch",
-    21: "pixelate",
-    22: "quantization",
-    23: "color_block",
-    24: "high_sharpen",
-    25: "contrast_change"
+    1: "awgn",
+    2: "blur",
+    3: "contrast",
+    4: "jpeg",
+    5: "jpeg2000",
+    6: "fnoise"
 }
 
 # 강도 레벨 정의
 def get_distortion_levels():
     return {
-        'gaussian_blur': [1, 2, 3, 4, 5],
-        'lens_blur': [1, 2, 3, 4, 5],
-        'motion_blur': [1, 2, 3, 4, 5],
-        'color_diffusion': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'color_shift': [10, 20, 30, 40, 50],
-        'jpeg2000': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'white_noise': [5, 10, 15, 20, 25],
-        'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'denoise': [1, 2, 3, 4, 5],  # 강도 레벨 추가
-        'brighten': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'darken': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'mean_shift': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'jitter': [1, 2, 3, 4, 5],
-        'non_eccentricity_patch': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'pixelate': [1, 2, 3, 4, 5],
-        'quantization': [1, 2, 3, 4, 5],
-        'color_block': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'high_sharpen': [1, 2, 3, 4, 5],
-        'contrast_change': [0.1, 0.2, 0.3, 0.4, 0.5]
+        'awgn': [5, 10, 15, 20, 25],
+        'blur': [1, 2, 3, 4, 5],
+        'contrast': [0.5, 0.7, 0.9, 1.1, 1.3],
+        'jpeg': [10, 20, 30, 40, 50],
+        'jpeg2000': [10, 20, 30, 40, 50],
+        'fnoise': [1, 2, 3, 4, 5]
     }
 
 
@@ -115,13 +81,12 @@ class KONIQ10KDataset(Dataset):
 
     def apply_distortion(self, image, distortion, level):
         try:
-            image = image.convert("RGB")  # Ensure the image is in RGB format
+            image = image.convert("RGB")  # RGB 변환
 
             if distortion == "awgn":
                 image_array = np.array(image, dtype=np.float32)
                 noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
-                noisy_image = image_array + noise
-                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+                noisy_image = np.clip(image_array + noise, 0, 255).astype(np.uint8)
                 image = Image.fromarray(noisy_image)
 
             elif distortion == "blur":
@@ -144,115 +109,16 @@ class KONIQ10KDataset(Dataset):
             elif distortion == "fnoise":
                 image_array = np.array(image, dtype=np.float32)
                 noise = np.random.normal(0, level * 255, image_array.shape).astype(np.float32)
-                noisy_image = image_array + noise
-                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+                noisy_image = np.clip(image_array + noise, 0, 255).astype(np.uint8)
                 image = Image.fromarray(noisy_image)
-
-            # Additional distortions from TID2013
-            elif distortion == "gaussian_blur":
-                image = image.filter(ImageFilter.GaussianBlur(radius=level))
-
-            elif distortion == "lens_blur":
-                image = image.filter(ImageFilter.GaussianBlur(radius=level))
-
-            elif distortion == "motion_blur":
-                image = image.filter(ImageFilter.BoxBlur(level))
-
-            elif distortion == "color_diffusion":
-                diffused = np.array(image).astype(np.float32)
-                diffusion = np.random.uniform(-level * 255, level * 255, size=diffused.shape).astype(np.float32)
-                diffused += diffusion
-                diffused = np.clip(diffused, 0, 255).astype(np.uint8)
-                image = Image.fromarray(diffused)
-
-            elif distortion == "color_shift":
-                shifted = np.array(image).astype(np.float32)
-                shift_amount = np.random.uniform(-level * 255, level * 255, shifted.shape[-1])
-                shifted += shift_amount
-                image = Image.fromarray(np.clip(shifted, 0, 255).astype(np.uint8))
-
-            elif distortion == "white_noise":
-                image_array = np.array(image, dtype=np.float32)
-                noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
-                noisy_image = image_array + noise
-                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
-                image = Image.fromarray(noisy_image)
-
-            elif distortion == "impulse_noise":
-                image_array = np.array(image).astype(np.float32)
-                prob = level
-                mask = np.random.choice([0, 1], size=image_array.shape[:2], p=[1 - prob, prob])
-                random_noise = np.random.choice([0, 255], size=(image_array.shape[0], image_array.shape[1], 1))
-                image_array[mask == 1] = random_noise[mask == 1]
-                image_array = np.clip(image_array, 0, 255).astype(np.uint8)
-                image = Image.fromarray(image_array)
-
-            elif distortion == "multiplicative_noise":
-                image_array = np.array(image).astype(np.float32)
-                noise = np.random.normal(1, level, image_array.shape)
-                noisy_image = image_array * noise
-                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
-                image = Image.fromarray(noisy_image)
-
-            elif distortion == "denoise":
-                image = image.filter(ImageFilter.MedianFilter(size=int(level)))
-
-            elif distortion == "brighten":
-                enhancer = ImageEnhance.Brightness(image)
-                image = enhancer.enhance(1 + level)
-
-            elif distortion == "darken":
-                enhancer = ImageEnhance.Brightness(image)
-                image = enhancer.enhance(1 - level)
-
-            elif distortion == "mean_shift":
-                shifted_image = np.array(image).astype(np.float32) + level * 255
-                image = Image.fromarray(np.clip(shifted_image, 0, 255).astype(np.uint8))
-
-            elif distortion == "jitter":
-                jitter = np.random.randint(-level * 255, level * 255, (image.height, image.width, 3))
-                img_array = np.array(image).astype(np.float32) + jitter
-                image = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
-
-            elif distortion == "non_eccentricity_patch":
-                width, height = image.size
-                crop_level = int(level * min(width, height))
-                image = image.crop((crop_level, crop_level, width - crop_level, height - crop_level))
-                image = image.resize((width, height))
-
-            elif distortion == "pixelate":
-                width, height = image.size
-                image = image.resize((width // level, height // level)).resize((width, height), Image.NEAREST)
-
-            elif distortion == "quantization":
-                quantized = (np.array(image) // int(256 / level)) * int(256 / level)
-                image = Image.fromarray(np.clip(quantized, 0, 255).astype(np.uint8))
-
-            elif distortion == "color_block":
-                block_size = max(1, int(image.width * level))
-                img_array = np.array(image)
-                for i in range(0, img_array.shape[0], block_size):
-                    for j in range(0, img_array.shape[1], block_size):
-                        block_color = np.random.randint(0, 256, (1, 1, 3))
-                        img_array[i:i + block_size, j:j + block_size] = block_color
-                image = Image.fromarray(img_array)
-
-            elif distortion == "high_sharpen":
-                enhancer = ImageEnhance.Sharpness(image)
-                image = enhancer.enhance(level)
-
-            elif distortion == "contrast_change":
-                enhancer = ImageEnhance.Contrast(image)
-                image = enhancer.enhance(level)
 
             else:
                 print(f"[Warning] Distortion type '{distortion}' not implemented.")
 
         except Exception as e:
             print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
-        
-        return image
 
+        return image
 
 
     def apply_random_distortions(self, image, distortions=None, levels=None):
