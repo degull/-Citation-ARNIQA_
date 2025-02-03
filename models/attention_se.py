@@ -121,100 +121,133 @@ class TextureBlockProcessor(nn.Module):
     def forward(self, x):
         return self.conv(x)
 
+
 class DistortionAttention(nn.Module):
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, expected_channels=256):  # 🔥 expected_channels 추가
         super(DistortionAttention, self).__init__()
-        query_key_channels = max(1, in_channels // 8)
-        self.query_conv = nn.Conv2d(in_channels, query_key_channels, kernel_size=1)
-        self.key_conv = nn.Conv2d(in_channels, query_key_channels, kernel_size=1)
-        self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.expected_channels = expected_channels  # ✅ 클래스 변수로 저장
+
+        query_key_channels = max(1, expected_channels // 8)
+        
+        # ✅ 입력 채널을 ResNet의 expectation과 맞춤
+        self.channel_adjust = nn.Conv2d(in_channels, expected_channels, kernel_size=1)
+        
+        self.query_conv = nn.Conv2d(expected_channels, query_key_channels, kernel_size=1)
+        self.key_conv = nn.Conv2d(expected_channels, query_key_channels, kernel_size=1)
+        self.value_conv = nn.Conv2d(expected_channels, expected_channels, kernel_size=1)
         self.softmax = nn.Softmax(dim=-1)
-        self.distortion_classifier = DistortionClassifier(in_channels)
+        self.distortion_classifier = DistortionClassifier(expected_channels)
 
     def forward(self, x):
         b, c, h, w = x.size()
+        
+        # ✅ 채널 변환 적용
+        x = self.channel_adjust(x)  # 🔥 512 → 256으로 변환
+
         distortion_logits = self.distortion_classifier(x)
         distortion_types = torch.argmax(distortion_logits, dim=1)
-        query = self.query_conv(x).view(b, -1, h * w).permute(0, 2, 1)
-        key = self.key_conv(x).view(b, -1, h * w)
-        value = self.value_conv(x).view(b, -1, h * w)
+
+        # ✅ 필터 적용 후 채널 크기 맞춤
+        filtered_tensors = []
+        for i, dt in enumerate(distortion_types):
+            filtered_x = self._apply_filter(x[i].unsqueeze(0), dt)
+
+            # ✅ 1채널이면 expected_channels(256)로 확장
+            if filtered_x.shape[1] == 1:
+                filtered_x = filtered_x.expand(-1, self.expected_channels, -1, -1)  # 🔥 수정된 코드
+
+            filtered_tensors.append(filtered_x)
+        
+        filtered_x = torch.cat(filtered_tensors, dim=0)
+        
+        query = self.query_conv(filtered_x).view(b, -1, h * w).permute(0, 2, 1)
+        key = self.key_conv(filtered_x).view(b, -1, h * w)
+        value = self.value_conv(filtered_x).view(b, -1, h * w)
+        
         scale = query.size(-1) ** -0.5
         attention = self.softmax(torch.bmm(query, key) * scale)
-        out = torch.bmm(value, attention.permute(0, 2, 1)).view(b, c, h, w)
-        return out + x , distortion_logits
+        out = torch.bmm(value, attention.permute(0, 2, 1)).view(b, self.expected_channels, h, w)
+
+        return out + x, distortion_logits
+
 
     def _apply_filter(self, x, distortion_type):
-        if isinstance(distortion_type, str):
-            distortion_type = distortion_map.get(distortion_type, -1)
-
-        if distortion_type in [0, 1, 2, 3, 6, 7, 12, 14, 15, 16, 18, 23, 24, 28, 33, 34, 35, 36, 37, 38, 40, 41, 42, 43]:  # Sobel applicable distortions
+        """각 distortion_type에 맞는 필터 적용"""
+        if distortion_type in [0, 1, 2, 3, 6, 7, 12, 14, 15, 16, 18, 23, 24, 28, 33, 34, 35, 36, 37, 38, 40, 41, 42, 43]:
             return self._sobel_filter(x)
-        elif distortion_type in [4, 8, 10, 11, 13, 17, 29, 31, 32]:  # HSV analysis applicable distortions
+        else:
+            return x  # 필터가 필요하지 않은 경우 원본 반환
+
+
+
+    def _apply_single_filter(self, x, distortion_type):
+        if distortion_type in [0, 1, 2, 3, 6, 7, 12, 14, 15, 16, 18, 23, 24, 28, 33, 34, 35, 36, 37, 38, 40, 41, 42, 43]:
+            return self._sobel_filter(x)
+        elif distortion_type in [4, 8, 10, 11, 13, 17, 29, 31, 32]:
             return self._hsv_analysis(x)
-        elif distortion_type == 21:  # Histogram analysis applicable distortions
+        elif distortion_type == 21:
             return self._histogram_analysis(x)
-        elif distortion_type in [5, 9, 19, 20, 22, 25, 26, 27, 30, 39, 44, 45, 46, 47]:  # Fourier Transform applicable distortions
+        elif distortion_type in [5, 9, 19, 20, 22, 25, 26, 27, 30, 39, 44, 45, 46, 47]:
             return self._fourier_analysis(x)
         else:
-            return torch.ones_like(x[:, :1, :, :])
+            return x
 
 
     def _sobel_filter(self, x):
-        sobel_x = self.sobel_x.repeat(x.size(1), 1, 1, 1).to(x.device)  # Repeat for each input channel
-        sobel_y = self.sobel_y.repeat(x.size(1), 1, 1, 1).to(x.device)
+        """Sobel 필터 적용"""
+        c = x.size(1)
+        sobel_x = torch.tensor([[[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]], dtype=torch.float32).to(x.device).unsqueeze(0)
+        sobel_y = torch.tensor([[[-1, -2, -1], [0, 0, 0], [1, 2, 1]]], dtype=torch.float32).to(x.device).unsqueeze(0)
 
-        grad_x = F.conv2d(x, sobel_x, padding=1, groups=x.size(1))  # Convolution with Sobel X
-        grad_y = F.conv2d(x, sobel_y, padding=1, groups=x.size(1))  # Convolution with Sobel Y
-        gradient_magnitude = torch.sqrt(grad_x ** 2 + grad_y ** 2)  # Compute gradient magnitude
+        if c > 1:
+            sobel_x = sobel_x.repeat(c, 1, 1, 1)
+            sobel_y = sobel_y.repeat(c, 1, 1, 1)
 
-        # Normalize gradient magnitude
-        return torch.sigmoid(gradient_magnitude.mean(dim=1, keepdim=True))
+        grad_x = F.conv2d(x, sobel_x, padding=1, groups=c)
+        grad_y = F.conv2d(x, sobel_y, padding=1, groups=c)
+        gradient_magnitude = torch.sqrt(grad_x ** 2 + grad_y ** 2)
+
+        return torch.sigmoid(gradient_magnitude.mean(dim=1, keepdim=True))  # 1채널로 반환
 
     def _hsv_analysis(self, x):
         hsv = self._rgb_to_hsv(x)
-        return hsv[:, 1:2, :, :]  # Saturation channel
-
+        return hsv[:, 1:2, :, :]  # Saturation 채널 반환
+    
     def _histogram_analysis(self, x):
         hist_map = torch.mean(x, dim=1, keepdim=True)
-        return torch.sigmoid(hist_map)
+        return F.normalize(hist_map, p=2, dim=[-2, -1])  # L2 정규화 추가
+
 
     def _fourier_analysis(self, x):
-        # 입력 텐서를 패딩하여 크기를 2의 거듭제곱으로 만듭니다.
         h, w = x.shape[-2:]
-        new_h = 2 ** int(np.ceil(np.log2(h)))
-        new_w = 2 ** int(np.ceil(np.log2(w)))
-        
-        # 패딩 추가
-        padded_x = F.pad(x, (0, new_w - w, 0, new_h - h))  # (left, right, top, bottom)
-        
-        # FFT 계산
+        new_h, new_w = 2 ** int(np.ceil(np.log2(h))), 2 ** int(np.ceil(np.log2(w)))
+        padded_x = F.pad(x, (0, new_w - w, 0, new_h - h))
+
+        # ✅ `view_as_real()` 대신 `torch.abs()` 사용
         fft = torch.fft.fft2(padded_x, dim=(-2, -1))
-        fft_shift = torch.fft.fftshift(fft, dim=(-2, -1))
-        magnitude = torch.sqrt(fft_shift.real ** 2 + fft_shift.imag ** 2)
-        
-        # 원래 크기로 잘라내기
-        magnitude = magnitude[:, :, :h, :w]
-        
-        # 출력 결과 정규화 및 반환
-        return torch.sigmoid(magnitude.mean(dim=1, keepdim=True))
+        magnitude = torch.abs(fft)
+        return torch.sigmoid(magnitude[:, :, :h, :w].mean(dim=1, keepdim=True))
+
 
 
     def _rgb_to_hsv(self, x):
         max_rgb, _ = x.max(dim=1, keepdim=True)
         min_rgb, _ = x.min(dim=1, keepdim=True)
-        delta = max_rgb - min_rgb + 1e-6
-        saturation = delta / (max_rgb + 1e-6)
-        value = max_rgb
-        return torch.cat((delta, saturation, value), dim=1)
+        delta = max_rgb - min_rgb
+        saturation = delta / torch.clamp(max_rgb, min=1e-6)
+        value = max_rgb  # 추가된 value 채널
+        return torch.cat((delta, saturation, value), dim=1)  # HSV 3채널 반환
+
     
 
 class HardNegativeCrossAttention(nn.Module):
     def __init__(self, in_channels, num_heads=8):
         super(HardNegativeCrossAttention, self).__init__()
-        # num_heads와 in_channels가 호환되지 않을 경우 조정
+
+        # num_heads 자동 조정
         if in_channels % num_heads != 0:
             print(f"[경고] in_channels={in_channels}는 num_heads={num_heads}로 나눌 수 없습니다.")
-            num_heads = max(1, in_channels // 8)  # 적절한 num_heads 재설정
+            num_heads = max(1, in_channels // 8)
             print(f"[수정] num_heads={num_heads}로 변경되었습니다.")
 
         self.num_heads = num_heads
@@ -223,17 +256,17 @@ class HardNegativeCrossAttention(nn.Module):
         self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
         self.output_proj = nn.Conv2d(in_channels, in_channels, kernel_size=1)
         self.softmax = nn.Softmax(dim=-1)
-        self.layer_norm = None
 
         self.attribute_processor = AttributeFeatureProcessor(in_channels)
         self.texture_processor = TextureBlockProcessor(in_channels)
 
+        # ✅ 미리 LayerNorm 초기화
+        self.layer_norm = nn.LayerNorm([in_channels, 1, 1])
+
     def forward(self, x_attr, x_texture):
-        # Process attribute and texture features
         x_attr = self.attribute_processor(x_attr)
         x_texture = self.texture_processor(x_texture)
 
-        # Ensure compatibility for feature dimensions
         if x_attr.size(2) != x_texture.size(2) or x_attr.size(3) != x_texture.size(3):
             min_h = min(x_attr.size(2), x_texture.size(2))
             min_w = min(x_attr.size(3), x_texture.size(3))
@@ -243,30 +276,28 @@ class HardNegativeCrossAttention(nn.Module):
         b, c, h, w = x_attr.size()
         head_dim = c // self.num_heads
 
-        # Query, Key, Value 계산
         multi_head_query = self.query_conv(x_attr).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
         multi_head_key = self.key_conv(x_texture).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 2, 3)
         multi_head_value = self.value_conv(x_texture).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
 
-        # Scale factor 및 Attention 계산
         scale = torch.sqrt(torch.tensor(head_dim, dtype=torch.float32).clamp(min=1e-6)).to(multi_head_query.device)
         attention = self.softmax(torch.matmul(multi_head_query, multi_head_key) / scale)
         out = torch.matmul(attention, multi_head_value).permute(0, 1, 3, 2).contiguous()
 
-        # Reshape 및 Output Projection
         out = out.view(b, c, h, w)
         out = self.output_proj(out)
         out = nn.Dropout(p=0.1)(out) + x_attr
 
-        # Apply LayerNorm
-        if self.layer_norm is None or self.layer_norm.normalized_shape != (c, h, w):
+        # ✅ `self.layer_norm`이 None일 경우 즉시 생성
+        if not hasattr(self, "layer_norm") or self.layer_norm.normalized_shape != (c, h, w):
             self.layer_norm = nn.LayerNorm([c, h, w]).to(out.device)
 
         out = self.layer_norm(out)
         return out
 
 
-# 시각화 함수
+
+# 시각화 함수1
 def visualize_distortion_classification(input_image, distortion_logits):
     distortion_probs = torch.softmax(distortion_logits, dim=1).detach().cpu().numpy()[0]
 
@@ -301,20 +332,21 @@ if __name__ == "__main__":
     input_image_path = r"E:\ARNIQA - SE - mix\ARNIQA\dataset\KONIQ10K\1024x768\11706252.jpg"
     input_image = Image.open(input_image_path).convert("RGB")
     input_tensor = transforms.Compose([
-        transforms.Resize((64, 64)),  # 이미지 크기를 64x64로 축소
+        transforms.Resize((64, 64)),
         transforms.ToTensor()
-    ])(input_image).unsqueeze(0)
+    ])(input_image).unsqueeze(1)  # 1채널 -> 3채널 확장 필요
 
     # DistortionAttention 모델 초기화
-    in_channels = input_tensor.size(1)
+    in_channels = 3  # RGB 3채널로 설정
     distortion_attention = DistortionAttention(in_channels=in_channels)
 
-    # DistortionAttention 통과
+    # DistortionAttention 적용
     with torch.no_grad():
-        output, distortion_logits = distortion_attention(input_tensor)
+        output, distortion_logits = distortion_attention(input_tensor.repeat(1, 3, 1, 1))  # 1채널 → 3채널 확장
 
-    # 분류 결과 시각화
+    # 결과 시각화
     visualize_distortion_classification(np.array(input_image), distortion_logits)
+
 
 
 

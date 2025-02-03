@@ -11,6 +11,7 @@ import io
 from PIL import ImageEnhance, ImageFilter, Image
 import io
 from pathlib import Path
+import cv2
 
 # 왜곡 유형 매핑
 distortion_types_mapping = {
@@ -156,10 +157,21 @@ class TID2013Dataset(Dataset):
                 image = Image.fromarray(np.clip(noisy_image, 0, 255).astype(np.uint8))
 
             elif distortion == "masked_noise":
-                mask = np.random.choice([0, 255], size=(image.height, image.width, 1), p=[0.9, 0.1])
                 image_array = np.array(image).astype(np.float32)
-                image_array[mask == 255] = 255
-                image = Image.fromarray(np.clip(image_array, 0, 255).astype(np.uint8))
+
+                # ✅ prob이 0~1 사이 값이 되도록 보정
+                prob = max(0, min(level / 5, 1))  # level 값이 0~5라면 0~1로 정규화
+
+                mask = np.random.choice([0, 1], size=(image_array.shape[0], image_array.shape[1], 1), p=[1 - prob, prob])
+
+                # ✅ Mask를 RGB 채널 수에 맞게 확장
+                mask = np.repeat(mask, 3, axis=2)
+
+                random_noise = np.random.choice([0, 255], size=image_array.shape)
+                image_array[mask == 1] = random_noise[mask == 1]
+
+                image_array = np.clip(image_array, 0, 255).astype(np.uint8)
+                return Image.fromarray(image_array)
 
             elif distortion == "high_frequency_noise":
                 freq_noise = np.random.normal(0, level, (image.height, image.width, 3))
@@ -190,15 +202,18 @@ class TID2013Dataset(Dataset):
                 buffer = io.BytesIO()
                 image.save(buffer, format="JPEG", quality=quality)
                 buffer.seek(0)
-                return Image.open(buffer)
+                image = Image.open(buffer).convert("RGB")  # ✅ JPEG 압축 후 RGB 변환 추가
+
 
             elif distortion == "jpeg2000_compression":
                 image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
 
             elif distortion == "jpeg_transmission_errors":
-                image = image.convert("L")
+                image = image.convert("L")  # Grayscale 변환
                 image = image.resize((image.width // 2, image.height // 2))
                 image = image.resize((image.width, image.height))
+                image = image.convert("RGB")  # ✅ 다시 RGB로 변환 추가
+
 
             elif distortion == "contrast_change":
                 enhancer = ImageEnhance.Contrast(image)
@@ -216,7 +231,7 @@ class TID2013Dataset(Dataset):
 
             elif distortion == "mean_shift":
                 shifted_image = np.array(image).astype(np.float32) + level * 255
-                image = Image.fromarray(np.clip(shifted_image, 0, 255).astype(np.uint8))
+                image = Image.fromarray(np.clip(shifted_image, 0, 255).astype(np.uint8)).convert("RGB")  # ✅ 추가
 
             elif distortion == "comfort_noise":
                 image = image.filter(ImageFilter.SMOOTH)
@@ -224,8 +239,19 @@ class TID2013Dataset(Dataset):
             elif distortion == "non_eccentricity_pattern_noise":
                 width, height = image.size
                 crop_level = int(level * min(width, height))
-                image = image.crop((crop_level, crop_level, width - crop_level, height - crop_level))
-                image = image.resize((width, height))
+
+                # ✅ Crop 좌표가 음수가 되지 않도록 제한
+                crop_level = min(crop_level, width // 2 - 1, height // 2 - 1)
+
+                left = max(0, crop_level)
+                top = max(0, crop_level)
+                right = min(width, width - crop_level)
+                bottom = min(height, height - crop_level)
+
+                if right > left and bottom > top:
+                    image = image.crop((left, top, right, bottom))
+                else:
+                    print(f"[Warning] Skipping 'non_eccentricity_pattern_noise' for level {level} due to invalid crop size.")
 
             elif distortion == "local_block_wise_distortions":
                 image_array = np.array(image)
@@ -242,13 +268,26 @@ class TID2013Dataset(Dataset):
             elif distortion == "lossy_compression_of_noisy_images":
                 image = image.resize((image.width // 2, image.height // 2))
                 image = image.resize((image.width, image.height))
+                image = image.convert("RGB")
 
             elif distortion == "chromatic_aberrations":
                 image = image.convert("RGB")
                 r, g, b = image.split()
-                r = r.offset(int(level * 2), int(level * 2))
-                b = b.offset(int(-level * 2), int(-level * 2))
-                image = Image.merge("RGB", (r, g, b))
+
+                shift_x = int(level * 2)
+                shift_y = int(level * 2)
+
+                # ✅ `offset` 대신 `numpy.roll()` 사용하여 채널 이동
+                r_array = np.array(r)
+                b_array = np.array(b)
+
+                r_shifted = np.roll(r_array, shift=(shift_x, shift_y), axis=(0, 1))
+                b_shifted = np.roll(b_array, shift=(-shift_x, -shift_y), axis=(0, 1))
+
+                r_new = Image.fromarray(r_shifted)
+                b_new = Image.fromarray(b_shifted)
+
+                image = Image.merge("RGB", (r_new, g, b_new))
 
             elif distortion == "sparse_sampling_and_reconstruction":
                 downsampled = image.resize((image.width // level, image.height // level))

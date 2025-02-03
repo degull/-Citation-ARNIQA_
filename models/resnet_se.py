@@ -1,4 +1,3 @@
-# ver1
 import sys
 import os
 
@@ -14,22 +13,30 @@ from utils.utils_visualization import visualize_feature_maps
 class SEBlock(nn.Module):
     def __init__(self, in_channels, reduction=16):
         super(SEBlock, self).__init__()
+        self.in_channels = in_channels  # 🔥 채널 크기 저장
         self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
+
+        # ✅ FC 입력 차원 자동 조정
+        reduced_channels = max(in_channels // reduction, 4)  # 너무 작아지지 않도록 최소값 설정
+
         self.fc = nn.Sequential(
-            nn.Linear(in_channels, in_channels // reduction, bias=False),
+            nn.Linear(in_channels, reduced_channels, bias=False),
             nn.ReLU(inplace=True),
-            nn.Linear(in_channels // reduction, in_channels, bias=False),
+            nn.Linear(reduced_channels, in_channels, bias=False),
             nn.Sigmoid()
         )
 
     def forward(self, x):
-        # 튜플 처리
+        """SEBlock Forward: Tuple 체크 후 SE 적용"""
         if isinstance(x, tuple):
-            x = x[0]  # 첫 번째 요소를 사용
+            x = x[0]  # 첫 번째 요소 사용
         b, c, _, _ = x.size()
-        y = self.global_avg_pool(x).view(b, c)
-        y = self.fc(y).view(b, c, 1, 1)
-        return x * y
+
+        y = self.global_avg_pool(x).view(b, c)  # 🔥 Global Avg Pool 후 Flatten
+        y = self.fc(y)  # ✅ 차원 자동 조정된 FC 적용
+        y = y.view(b, c, 1, 1)  # ✅ 다시 4D로 변환
+
+        return x * y  # 🔥 SE 적용
 
 
 
@@ -37,84 +44,47 @@ class ResNetSE(nn.Module):
     def __init__(self):
         super(ResNetSE, self).__init__()
         base_model = resnet50(pretrained=True)
-        self.layer0 = nn.Sequential(
-            base_model.conv1, base_model.bn1, base_model.relu, base_model.maxpool
-        )
+        self.layer0 = nn.Sequential(base_model.conv1, base_model.bn1, base_model.relu, base_model.maxpool)
         self.layer1 = base_model.layer1
         self.layer2 = base_model.layer2
         self.layer3 = base_model.layer3
         self.layer4 = base_model.layer4
 
-        # Distortion Attention and SE Modules
-        self.distortion_attention1 = DistortionAttention(256)
-        self.distortion_attention2 = DistortionAttention(512)
-        self.distortion_attention3 = DistortionAttention(1024)
-        self.distortion_attention4 = DistortionAttention(2048)
-
-        self.se1 = SEBlock(256)
-        self.se2 = SEBlock(512)
-        self.se3 = SEBlock(1024)
-        self.se4 = SEBlock(2048)
-
-        # Hard Negative Cross Attention
-        self.hard_negative_attention = HardNegativeCrossAttention(2048)
-
-        # Global Average Pooling
-        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        # ✅ SE Blocks 채널 크기 자동 확인 후 맞춤
+        self.se1 = SEBlock(256)   # 🔥 Layer1 출력 크기와 일치
+        self.se2 = SEBlock(512)   # 🔥 Layer2 출력 크기와 일치
+        self.se3 = SEBlock(1024)  # 🔥 Layer3 출력 크기와 일치
+        self.se4 = SEBlock(2048)  # 🔥 Layer4 출력 크기와 일치
 
     def forward(self, x):
-        # Layer 0
+        """Forward pass with debug prints"""
         x = self.layer0(x)
-        print(f"Layer0 output: {x.size()}")  # 출력 크기 확인
+        print(f"Layer0 output: {x.size()}")  # 🔥 디버깅용 출력 확인
 
-        # Layer 1
         x = self.layer1(x)
-        x = self.distortion_attention1(x)
-        if isinstance(x, tuple):  # 튜플 처리
-            x = x[0]
         x = self.se1(x)
-        print(f"Layer1 output: {x.size()}")
+        print(f"Layer1 output: {x.size()}")  # 🔥 채널 크기 확인
 
-        # Layer 2
         x = self.layer2(x)
-        x = self.distortion_attention2(x)
-        if isinstance(x, tuple):  # 튜플 처리
-            x = x[0]
         x = self.se2(x)
-        print(f"Layer2 output: {x.size()}")
+        print(f"Layer2 output: {x.size()}")  # 🔥 채널 크기 확인
 
-        # Layer 3
         x = self.layer3(x)
-        x = self.distortion_attention3(x)
-        if isinstance(x, tuple):  # 튜플 처리
-            x = x[0]
         x = self.se3(x)
-        print(f"Layer3 output: {x.size()}")
+        print(f"Layer3 output: {x.size()}")  # 🔥 채널 크기 확인
 
-        # Layer 4
         x = self.layer4(x)
-        x_attr = self.distortion_attention4(x)
-        if isinstance(x_attr, tuple):  # 튜플 처리
-            x_attr = x_attr[0]
-        x_texture = self.se4(x)
-        if isinstance(x_texture, tuple):  # 튜플 처리
-            x_texture = x_texture[0]
-        print(f"Layer4 output (before attention): {x.size()}")
+        x = self.se4(x)
+        print(f"Layer4 output: {x.size()}")  # 🔥 채널 크기 확인
 
-        x = self.hard_negative_attention(x_attr, x_texture)
-        print(f"Layer4 output (after attention): {x.size()}")
+        return x
 
-        # Global Average Pooling
-        x = self.global_avg_pool(x)
-        print(f"Global Avg Pool output: {x.size()}")
-        return x.view(x.size(0), -1)  # (batch_size, 2048)
 
 
 class ResNetSEVisualizer(nn.Module):
     def __init__(self, base_model, distortion_attentions, hard_negative_attention, se_blocks):
         super(ResNetSEVisualizer, self).__init__()
 
-        # 🔥 ResNet은 layer0이 없으므로 직접 생성해야 함
         self.layer0 = nn.Sequential(
             base_model.conv1,
             base_model.bn1,
@@ -132,20 +102,17 @@ class ResNetSEVisualizer(nn.Module):
         self.hard_negative_attention = hard_negative_attention
         self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-    def forward(self, x, original_image):
-        """
-        :param x: 입력 이미지 텐서
-        :param original_image: 원본 이미지 (PIL or numpy)
-        """
+    def forward(self, x):
+        """Feature visualization forward pass"""
         activation_maps = {}
 
-        # Layer 0 (Conv + MaxPool)
+        # Layer 0
         x = self.layer0(x)
         activation_maps["Layer0"] = x
 
         # Layer 1
         x = self.layer1(x)
-        x = self.distortion_attention1(x)[0]  # Distortion Attention 적용
+        x = self.distortion_attention1(x)[0]
         x = self.se1(x)
         activation_maps["Layer1"] = x
 
@@ -179,6 +146,7 @@ class ResNetSEVisualizer(nn.Module):
         activation_maps["GlobalAvgPool"] = x
 
         return activation_maps
+
 
 
 if __name__ == "__main__":

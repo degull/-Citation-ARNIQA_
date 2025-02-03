@@ -18,6 +18,9 @@ class SimCLR(nn.Module):
         # Backbone (ResNetSE)
         self.backbone = ResNetSE()
 
+        # 🔥 Global Average Pooling 추가
+        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+
         # Projection Head 정의
         self.projector = nn.Sequential(
             nn.Linear(2048, 2048),
@@ -26,25 +29,35 @@ class SimCLR(nn.Module):
         )
 
     def forward(self, inputs_A, inputs_B):
-        print(f"[Debug] inputs_A shape before ResNet: {inputs_A.shape}")
+        print(f"[Debug] inputs_A shape before ResNet: {inputs_A.shape}")  # (32, 3, 224, 224)
         print(f"[Debug] inputs_B shape before ResNet: {inputs_B.shape}")
 
         features_A = self.backbone(inputs_A)
-        if isinstance(features_A, tuple):  # 튜플 처리
-            features_A = features_A[0]
         features_B = self.backbone(inputs_B)
-        if isinstance(features_B, tuple):  # 튜플 처리
+
+        # 🔥 튜플 처리
+        if isinstance(features_A, tuple):  
+            features_A = features_A[0]
+        if isinstance(features_B, tuple):  
             features_B = features_B[0]
-        print(f"[Debug] features_A shape after ResNet: {features_A.shape}")
+
+        print(f"[Debug] features_A shape after ResNet: {features_A.shape}")  # (32, 2048, 7, 7)
         print(f"[Debug] features_B shape after ResNet: {features_B.shape}")
 
-        proj_A = self.projector(features_A)
+        # 🔥 Global Average Pooling 적용하여 Flatten
+        features_A = torch.flatten(self.global_avg_pool(features_A), start_dim=1)  # (32, 2048)
+        features_B = torch.flatten(self.global_avg_pool(features_B), start_dim=1)
+
+        print(f"[Debug] features_A shape before Projector: {features_A.shape}")  # (32, 2048)
+        print(f"[Debug] features_B shape before Projector: {features_B.shape}")
+
+        proj_A = self.projector(features_A)  # (32, 128)
         proj_B = self.projector(features_B)
-        print(f"[Debug] proj_A shape after Projector: {proj_A.shape}")
+
+        print(f"[Debug] proj_A shape after Projector: {proj_A.shape}")  # (32, 128)
         print(f"[Debug] proj_B shape after Projector: {proj_B.shape}")
 
         return proj_A, proj_B
-
 
     def compute_loss(self, proj_A, proj_B, proj_negatives):
         # NT-Xent Loss 계산
@@ -61,8 +74,8 @@ if __name__ == "__main__":
     inputs_B = torch.randn(32, 3, 224, 224)
 
     proj_A, proj_B = model(inputs_A, inputs_B)
-    print(f"Final proj_A shape: {proj_A.shape}")
-    print(f"Final proj_B shape: {proj_B.shape}")
+    print(f"Final proj_A shape: {proj_A.shape}")  # (32, 128)
+    print(f"Final proj_B shape: {proj_B.shape}")  # (32, 128)
 
 # SE-weighted logic 추가
 """ 
