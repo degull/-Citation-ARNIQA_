@@ -50,11 +50,19 @@ class ResNetSE(nn.Module):
         self.layer3 = base_model.layer3
         self.layer4 = base_model.layer4
 
+        self.distortion_attention1 = DistortionAttention(256)
+        self.distortion_attention2 = DistortionAttention(512)
+        self.distortion_attention3 = DistortionAttention(1024)
+        self.distortion_attention4 = DistortionAttention(2048)
+
         # ✅ SE Blocks 채널 크기 자동 확인 후 맞춤
         self.se1 = SEBlock(256)   # 🔥 Layer1 출력 크기와 일치
         self.se2 = SEBlock(512)   # 🔥 Layer2 출력 크기와 일치
         self.se3 = SEBlock(1024)  # 🔥 Layer3 출력 크기와 일치
         self.se4 = SEBlock(2048)  # 🔥 Layer4 출력 크기와 일치
+
+        self.hard_negative_attention = HardNegativeCrossAttention(2048)
+        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
     def forward(self, x):
         """Forward pass with debug prints"""

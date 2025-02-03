@@ -172,25 +172,27 @@ class DistortionAttention(nn.Module):
 
 
     def _apply_filter(self, x, distortion_type):
-        """각 distortion_type에 맞는 필터 적용"""
         if distortion_type in [0, 1, 2, 3, 6, 7, 12, 14, 15, 16, 18, 23, 24, 28, 33, 34, 35, 36, 37, 38, 40, 41, 42, 43]:
-            return self._sobel_filter(x)
-        else:
-            return x  # 필터가 필요하지 않은 경우 원본 반환
+            print(f"[Debug] Applying Sobel filter for distortion type: {distortion_type}")
+            return self._sobel_filter(x)  # ✅ Sobel 필터 적용 (다른 필터와 독립적으로 실행)
 
-
-
-    def _apply_single_filter(self, x, distortion_type):
-        if distortion_type in [0, 1, 2, 3, 6, 7, 12, 14, 15, 16, 18, 23, 24, 28, 33, 34, 35, 36, 37, 38, 40, 41, 42, 43]:
-            return self._sobel_filter(x)
         elif distortion_type in [4, 8, 10, 11, 13, 17, 29, 31, 32]:
-            return self._hsv_analysis(x)
+            print(f"[Debug] Applying HSV analysis for distortion type: {distortion_type}")
+            return self._hsv_analysis(x)  # ✅ HSV 필터 적용
+
         elif distortion_type == 21:
-            return self._histogram_analysis(x)
+            print(f"[Debug] Applying Histogram analysis for distortion type: {distortion_type}")
+            return self._histogram_analysis(x)  # ✅ Histogram 필터 적용
+
         elif distortion_type in [5, 9, 19, 20, 22, 25, 26, 27, 30, 39, 44, 45, 46, 47]:
-            return self._fourier_analysis(x)
+            print(f"[Debug] Applying Fourier analysis for distortion type: {distortion_type}")
+            return self._fourier_analysis(x)  # ✅ Fourier 필터 적용
+
         else:
-            return x
+            print(f"[Warning] Unknown distortion type: {distortion_type}, returning original input.")
+            return x  # ✅ 필터 미적용 (원본 그대로 반환)
+
+
 
 
     def _sobel_filter(self, x):
