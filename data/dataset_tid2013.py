@@ -195,7 +195,10 @@ class TID2013Dataset(Dataset):
                 image = image.filter(ImageFilter.GaussianBlur(radius=level))
 
             elif distortion == "image_denoising":
-                image = image.filter(ImageFilter.MedianFilter(size=int(level)))
+                filter_size = max(3, min(image.width // 10, image.height // 10))
+                if filter_size % 2 == 0:
+                    filter_size += 1  # 홀수 크기로 조정
+                image = image.filter(ImageFilter.MedianFilter(size=filter_size))
 
             elif distortion == "jpeg_compression":
                 quality = max(1, min(100, int(100 - (level * 100))))
@@ -209,10 +212,19 @@ class TID2013Dataset(Dataset):
                 image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
 
             elif distortion == "jpeg_transmission_errors":
-                image = image.convert("L")  # Grayscale 변환
-                image = image.resize((image.width // 2, image.height // 2))
-                image = image.resize((image.width, image.height))
-                image = image.convert("RGB")  # ✅ 다시 RGB로 변환 추가
+                temp_image = image.resize((image.width // 2, image.height // 2))
+                buffer = io.BytesIO()
+                temp_image.save(buffer, format="JPEG2000", quality_mode="rates", quality_layers=[max(0.01, level * 0.1)])
+                buffer.seek(0)
+                image = Image.open(buffer).resize((image.width, image.height)).convert("RGB")
+
+
+            elif distortion == "jpeg2000_transmission_errors":
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG2000", quality_mode="rates", quality_layers=[level * 0.1])
+                buffer.seek(0)
+                image = Image.open(buffer).convert("RGB")
+
 
 
             elif distortion == "contrast_change":
@@ -238,20 +250,18 @@ class TID2013Dataset(Dataset):
 
             elif distortion == "non_eccentricity_pattern_noise":
                 width, height = image.size
-                crop_level = int(level * min(width, height))
+                crop_level = max(1, int(level * 0.05 * min(width, height)))  # 🔥 Crop 비율 조정
 
-                # ✅ Crop 좌표가 음수가 되지 않도록 제한
-                crop_level = min(crop_level, width // 2 - 1, height // 2 - 1)
+                left = crop_level
+                top = crop_level
+                right = width - crop_level
+                bottom = height - crop_level
 
-                left = max(0, crop_level)
-                top = max(0, crop_level)
-                right = min(width, width - crop_level)
-                bottom = min(height, height - crop_level)
-
+                # ✅ Crop 크기가 적절한지 검증 후 실행
                 if right > left and bottom > top:
-                    image = image.crop((left, top, right, bottom))
+                    image = image.crop((left, top, right, bottom)).resize((width, height))
                 else:
-                    print(f"[Warning] Skipping 'non_eccentricity_pattern_noise' for level {level} due to invalid crop size.")
+                    print(f"[Warning] Skipping 'non_eccentricity_pattern_noise' for level {level} due to invalid crop size. (left={left}, right={right}, top={top}, bottom={bottom})")
 
             elif distortion == "local_block_wise_distortions":
                 image_array = np.array(image)
@@ -274,10 +284,9 @@ class TID2013Dataset(Dataset):
                 image = image.convert("RGB")
                 r, g, b = image.split()
 
-                shift_x = int(level * 2)
-                shift_y = int(level * 2)
+                shift_x = max(1, int(level * 2))
+                shift_y = max(1, int(level * 2))
 
-                # ✅ `offset` 대신 `numpy.roll()` 사용하여 채널 이동
                 r_array = np.array(r)
                 b_array = np.array(b)
 
