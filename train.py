@@ -786,7 +786,7 @@ if __name__ == "__main__":
 
 
 # 오버레이 시각화
-""" import torch
+import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -997,7 +997,7 @@ if __name__ == "__main__":
     import torchvision.transforms as transforms
 
     # ✅ 원본 이미지 로드
-    input_image_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ/TestImage/11104.jpg"
+    input_image_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013/distorted_images/i02_04_5.bmp"
     input_image = Image.open(input_image_path).convert("RGB")
 
     # ✅ 이미지 변환 (224x224)
@@ -1009,16 +1009,12 @@ if __name__ == "__main__":
 
     # ✅ ResNetSE 모델 로드
     base_model = resnet50(pretrained=True)
-
-
-    # ✅ 올바른 코드 (in_channels, expected_channels를 모두 전달)
     distortion_attentions = [
-        DistortionAttention(256, 512),   # ✅ 256 → 512 변환
-        DistortionAttention(512, 1024),  # ✅ 512 → 1024 변환
-        DistortionAttention(1024, 2048), # ✅ 1024 → 2048 변환
-        DistortionAttention(2048, 2048)  # ✅ 2048 유지
+        DistortionAttention(256, 256),
+        DistortionAttention(512, 512),
+        DistortionAttention(1024, 1024),
+        DistortionAttention(2048, 2048),
     ]
-
     se_blocks = [
         SEBlock(256), SEBlock(512),
         SEBlock(1024), SEBlock(2048)
@@ -1029,9 +1025,9 @@ if __name__ == "__main__":
     model = ResNetSEVisualizer(base_model, distortion_attentions, hard_negative_attention, se_blocks)
     model.eval()
 
-    # ✅ Feature Map 저장
+    # ✅ Feature Map 저장 (🔥 `original_image` 추가 전달)
     with torch.no_grad():
-        activation_maps = model(input_tensor)
+        activation_maps = model(input_tensor, original_image=input_image)  # 🔥 원본 이미지 추가 전달
 
     # 🔍 Feature Map Shape 확인 (디버깅)
     for layer, fmap in activation_maps.items():
@@ -1041,14 +1037,15 @@ if __name__ == "__main__":
     visualize_feature_maps(activation_maps, input_image)
 
 
- """
+
+
 
 # ------------------------------------------- cross dataset --------------------------
 
 
 
 
-import io
+""" import io
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -1058,7 +1055,7 @@ from pathlib import Path
 from scipy import stats
 from tqdm import tqdm
 from sklearn.linear_model import Ridge
-from data import TID2013Dataset, KADID10KDataset
+from data import TID2013Dataset, CSIQDataset
 from models.simclr import SimCLR
 from utils.utils import parse_config
 from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
@@ -1262,10 +1259,10 @@ if __name__ == "__main__":
     print(f"[Debug] TID2013 Dataset Path: {tid_dataset_path}")
     tid_dataset = TID2013Dataset(str(tid_dataset_path))
 
-    # KADID10KDataset 경로 설정 및 로드
-    kadid_dataset_path = Path(str(args.data_base_path_kadid))
-    print(f"[Debug] KADID Dataset Path: {kadid_dataset_path}")
-    kadid_dataset = KADID10KDataset(str(kadid_dataset_path))
+    # CSIQDataset 경로 설정 및 로드
+    csiq_dataset_path = Path(str(args.data_base_path_csiq))
+    print(f"[Debug] CSIQ Dataset Path: {csiq_dataset_path}")
+    csiq_dataset = CSIQDataset(str(csiq_dataset_path))
 
     # 훈련 데이터 분할
     train_size = int(0.8 * len(tid_dataset))
@@ -1281,7 +1278,7 @@ if __name__ == "__main__":
 
     # 테스트 데이터 로드
     test_dataloader = DataLoader(
-        kadid_dataset, batch_size=args.test.batch_size, shuffle=False, num_workers=4
+        csiq_dataset, batch_size=args.test.batch_size, shuffle=False, num_workers=4
     )
 
     # 모델 초기화
@@ -1312,9 +1309,9 @@ if __name__ == "__main__":
     )
 
     # 최종 결과 출력
-    print("TID2013 & KADID")
+    print("TID2013 & CSIQ")
     print("\nFinal Test Metrics Per Epoch:")
     for i, metrics in enumerate(test_metrics, 1):
         avg_srcc = np.mean(metrics['srcc'])
         avg_plcc = np.mean(metrics['plcc'])
-        print(f"Epoch {i}: SRCC = {avg_srcc:.4f}, PLCC = {avg_plcc:.4f}")
+        print(f"Epoch {i}: SRCC = {avg_srcc:.4f}, PLCC = {avg_plcc:.4f}") """
