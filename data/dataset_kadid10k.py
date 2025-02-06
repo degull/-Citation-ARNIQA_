@@ -43,27 +43,31 @@ distortion_types_mapping = {
 # 강도 레벨 정의
 def get_distortion_levels():
     return {
-        'gaussian_blur': [1, 2, 3, 4, 5],
-        'lens_blur': [1, 2, 3, 4, 5],
-        'motion_blur': [1, 2, 3, 4, 5],
-        'color_diffusion': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'color_shift': [10, 20, 30, 40, 50],
-        'jpeg2000': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'jpeg': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'white_noise': [5, 10, 15, 20, 25],
-        'impulse_noise': [0.05, 0.1, 0.2, 0.3, 0.4],
-        'multiplicative_noise': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'denoise': [1, 2, 3, 4, 5],  # 강도 레벨 추가
-        'brighten': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'darken': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'mean_shift': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'jitter': [1, 2, 3, 4, 5],
-        'non_eccentricity_patch': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'pixelate': [1, 2, 3, 4, 5],
-        'quantization': [1, 2, 3, 4, 5],
-        'color_block': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'high_sharpen': [1, 2, 3, 4, 5],
-        'contrast_change': [0.1, 0.2, 0.3, 0.4, 0.5]
+        "gaussian_blur": [1, 2, 3, 4, 5],
+        "lens_blur": [1, 2, 3, 4, 5],
+        "motion_blur": [1, 2, 3, 4, 5],
+        "color_diffusion": [0.05, 0.1, 0.2, 0.3, 0.4],
+        "color_shift": [10, 20, 30, 40, 50],
+        "color_quantization": [1, 2, 3, 4, 5],
+        "color_saturation_1": [0.5, 0.7, 0.9, 1.1, 1.3],
+        "color_saturation_2": [0.5, 0.7, 0.9, 1.1, 1.3],
+        "jpeg2000": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "jpeg": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "white_noise": [5, 10, 15, 20, 25],
+        "white_noise_color_component": [5, 10, 15, 20, 25],
+        "impulse_noise": [0.05, 0.1, 0.2, 0.3, 0.4],
+        "multiplicative_noise": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "denoise": [1, 2, 3, 4, 5],
+        "brighten": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "darken": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "mean_shift": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "jitter": [1, 2, 3, 4, 5],
+        "non_eccentricity_patch": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "pixelate": [1, 2, 3, 4, 5],
+        "quantization": [1, 2, 3, 4, 5],
+        "color_block": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "high_sharpen": [1, 2, 3, 4, 5],
+        "contrast_change": [0.1, 0.2, 0.3, 0.4, 0.5]
     }
 
 class KADID10KDataset:

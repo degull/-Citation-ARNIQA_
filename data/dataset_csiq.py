@@ -8,31 +8,28 @@ import random
 import io
 from PIL import ImageEnhance, ImageFilter, Image
 
-
-# CSIQ 데이터셋의 왜곡 유형 매핑
+# CSIQ 데이터셋의 왜곡 유형 매핑 (두 번째 코드와 일치하도록 수정)
 distortion_types_mapping = {
     1: "jpeg",
     2: "jpeg2000",
-    3: "gaussian_blur",
-    4: "white_noise",
-    5: "contrast_change",
-    6: "foveated_compression"
+    3: "blur",
+    4: "awgn",
+    5: "contrast",
+    6: "fnoise"
 }
 
-
-# 강도 레벨 정의
+# 강도 레벨 정의 (두 번째 코드와 동일하게 조정)
 def get_distortion_levels():
     return {
         'jpeg': [10, 20, 30, 40, 50],
         'jpeg2000': [10, 20, 30, 40, 50],
-        'gaussian_blur': [1, 2, 3, 4, 5],
-        'white_noise': [5, 10, 15, 20, 25],
-        'contrast_change': [0.5, 0.7, 0.9, 1.1, 1.3],
-        'foveated_compression': [1, 2, 3, 4, 5]
+        'blur': [1, 2, 3, 4, 5],  # 기존 gaussian_blur
+        'awgn': [5, 10, 15, 20, 25],  # 기존 white_noise
+        'contrast': [0.5, 0.7, 0.9, 1.1, 1.3],  # 기존 contrast_change
+        'fnoise': [1, 2, 3, 4, 5]  # 기존 foveated_compression
     }
 
 class CSIQDataset(Dataset):
-    # 단일
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         super().__init__()
         self.root = str(root)
@@ -49,27 +46,6 @@ class CSIQDataset(Dataset):
         self.image_paths = [os.path.join(self.root, img.replace("CSIQ/", "")) for img in scores_csv["dis_img_path"].values]
         self.reference_paths = [os.path.join(self.root, img.replace("CSIQ/", "")) for img in scores_csv["ref_img_path"].values]
         self.mos = scores_csv["score"].values
-
-    # cross-dataset
-    #def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
-    #    super().__init__()
-    #    self.root = str(root)
-    #    self.phase = phase
-    #    self.crop_size = crop_size
-    #    self.distortion_levels = get_distortion_levels()
-#
-    #    # MOS 파일 확인 및 로드
-    #    self.root = "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
-    #    scores_csv_path = os.path.join(self.root, "CSIQ.txt")
-    #    if not os.path.isfile(scores_csv_path):
-    #        raise FileNotFoundError(f"CSIQ.txt 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
-#
-    #    scores_csv = pd.read_csv(scores_csv_path, sep=",")
-    #    self.image_paths = [os.path.join(self.root, img.replace("CSIQ/", "")) for img in scores_csv["dis_img_path"].values]
-    #    self.reference_paths = [os.path.join(self.root, img.replace("CSIQ/", "")) for img in scores_csv["ref_img_path"].values]
-    #    self.mos = scores_csv["score"].values
-
-
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
@@ -91,20 +67,20 @@ class CSIQDataset(Dataset):
             elif distortion == "jpeg2000":
                 image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
 
-            elif distortion == "gaussian_blur":
+            elif distortion == "blur":
                 image = image.filter(ImageFilter.GaussianBlur(radius=level))
 
-            elif distortion == "white_noise":
+            elif distortion == "awgn":
                 image_array = np.array(image, dtype=np.float32)
                 noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
                 noisy_image = np.clip(image_array + noise, 0, 255).astype(np.uint8)
                 return Image.fromarray(noisy_image)
 
-            elif distortion == "contrast_change":
+            elif distortion == "contrast":
                 enhancer = ImageEnhance.Contrast(image)
                 image = enhancer.enhance(level)
 
-            elif distortion == "foveated_compression":
+            elif distortion == "fnoise":
                 image = image.filter(ImageFilter.BoxBlur(level))
 
             else:
@@ -114,7 +90,6 @@ class CSIQDataset(Dataset):
             print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
 
         return image
-
 
     def apply_random_distortions(self, image, distortions=None, levels=None):
         if distortions is None:
@@ -131,8 +106,6 @@ class CSIQDataset(Dataset):
                 continue
         return image
 
-    
-    
     def __getitem__(self, index: int):
         try:
             img_A_orig = Image.open(self.image_paths[index]).convert("RGB")
@@ -162,7 +135,7 @@ class CSIQDataset(Dataset):
 
     def __len__(self):
         return len(self.image_paths)
-    
+
 # CSIQDataset 테스트
 if __name__ == "__main__":
     dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"

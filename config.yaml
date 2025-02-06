@@ -5,18 +5,20 @@ seed: 27
 
 #data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KADID10K"
 #unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KADID10K"
-#
+
 #data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013"
 #unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013"
 
 #data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
-#unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
+#unseen_distortipath: "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
+
 
 #data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
-#unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
+#unseen_distortipath: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
 
-#data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE"
-#unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE"
+data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE"
+unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE"
+
 
 #data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
 #unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
@@ -27,10 +29,6 @@ data_base_path_spaq: "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
 data_base_path_csiq: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
 data_base_path_live: "E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE"
 data_base_path_koniq: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
-#data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
-data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
-
-# koniq
 
 
 checkpoint_base_path: "E:/ARNIQA - SE - mix/ARNIQA/experiments/my_experiment/regressors"
