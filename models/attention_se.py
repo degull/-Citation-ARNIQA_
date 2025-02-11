@@ -13,62 +13,76 @@ from PIL import ImageEnhance, ImageFilter, Image
 import matplotlib.pyplot as plt
 from torchvision import transforms
 
-
 distortion_map = {
-    "jpeg": 0,  # Sobel
-    "jpeg2000": 1,    #Sobel
-    "gaussian_blur": 2, #Sobel
-    "white_noise": 3,   #Sobel
-    "contrast_change": 4,  #HSV
+    # JPEG 압축 관련 (Sobel)
+    "jpeg": 0,  
+    "jpeg2000": 1,    
+    "jpeg_artifacts": 2,
+    "jpeg_transmission_errors": 3,
+    "jpeg2000_transmission_errors": 4,
 
-    "fast_fading": 5,  #Fourier
-    "awgn": 6,   #Sobel
-    "blur": 7,   #Sobel
-    "contrast": 8, #HSV
-    "fnoise": 9,   #Fourier
+    # 블러 관련 (Sobel)
+    "gaussian_blur": 5,  
+    "lens_blur": 6,
+    "motion_blur": 7,
+    "blur": 8,
 
-    "brightness": 10,  #HSV
-    "colorfulness": 11,    #HSV
-    "sharpness": 12, #Sobel
-    "exposure": 13,     #HSV
+    # 노이즈 관련 (Sobel)
+    "white_noise": 9,
+    "awgn": 10,   
+    "impulse_noise": 11,  
+    "multiplicative_noise": 12,
+    "additive_gaussian_noise": 13,
+    "additive_noise_in_color_components": 14,
+    "spatially_correlated_noise": 15,
+    "masked_noise": 16,
+    "high_frequency_noise": 17,
+    "comfort_noise": 18,
+    "lossy_compression_of_noisy_images": 19,
 
-    "lens_blur": 14,  #Sobel
-    "motion_blur": 15,    #Sobel
-    "color_diffusion": 16,    #Sobel
-    "color_shift": 17,  #HSV
+    # 대비 및 색상 관련 (HSV)
+    "contrast_change": 20,
+    "contrast": 21,
+    "brightness": 22,
+    "colorfulness": 23,
+    "sharpness": 24,
+    "exposure": 25,
+    "overexposure": 26,
+    "underexposure": 27,
+    "color_shift": 28,
+    "color_saturation_1": 29,
+    "color_saturation_2": 30,
+    "change_of_color_saturation": 31,
+    "white_balance_error": 32,
 
-    "impulse_noise": 18,  #Sobel
-    "multiplicative_noise": 19,     #Fourier
-    "denoise": 20,  #Fourier
-    "mean_shift": 21,  #Histogram
-    "jitter": 22,  #Fourier
-    "non_eccentricity_patch": 23,     #Sobel
-    "pixelate": 24,   #Sobel
-    "quantization": 25,     #Fourier
-    "color_block": 26,  #Fourier
-    "high_sharpen":27,     #Fourier
+    # 공간적 왜곡 관련 (Sobel)
+    "fnoise": 33,
+    "fast_fading": 34,
+    "color_diffusion": 35,
+    "mean_shift": 36,
+    "jitter": 37,
+    "non_eccentricity_patch": 38,
+    "pixelate": 39,
+    "spatial_noise": 40,
+    "non_eccentricity_pattern_noise": 41,
+    "local_block_wise_distortions": 42,
 
-    "spatial_noise": 28,  #Sobel
-    "color_saturation": 29,     #HSV
-    "color_quantization": 30,   #Fourier
-    "overexposure": 31,     #HSV
-    "underexposure": 32,    #HSV
-    "chromatic_aberration": 33,   #Sobel
+    # 양자화 및 압축 관련 (Fourier)
+    "quantization": 43,
+    "color_quantization": 44,
+    "image_color_quantization_with_dither": 45,
+    "color_block": 46,
+    "sparse_sampling_and_reconstruction": 47,
 
-    "additive_gaussian_noise": 34,    #Sobel
-    "additive_noise_in_color_components": 35,    #Sobel
-    "spatially_correlated_noise": 36,     #Sobel
-    "masked_noise": 37,   #Sobel
-    "high_frequency_noise": 38,   #Sobel
-    "image_denoising": 39,  #Fourier
-    "jpeg_transmission_errors": 40,   #Sobel
-    "jpeg2000_transmission_errors": 41,   #Sobel
-    "non_eccentricity_pattern_noise": 42,     #Sobel
-    "local_block_wise_distortions": 43,  #Sobel
-    "comfort_noise": 44,    #Fourier
-    "lossy_compression_of_noisy_images": 45,    #Fourier
-    "image_color_quantization_with_dither": 46,     #Fourier
-    "sparse_sampling_and_reconstruction": 47,   #Fourier
+    # 영상 왜곡 (Fourier)
+    "glare": 48,
+    "haze": 49,
+    "banding_artifacts": 50,
+    "vignetting": 51,
+    "chromatic_aberration": 52,
+    "distortion": 53,
+    "high_sharpen": 54,
+    "image_denoising": 55
 }
 
 
@@ -95,13 +109,13 @@ class AttributeFeatureProcessor(nn.Module):
     def __init__(self, in_channels):
         super(AttributeFeatureProcessor, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),  # 첫 번째 Conv
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(in_channels),
             nn.ReLU(),
-            nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),  # 두 번째 Conv
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(in_channels),
             nn.ReLU(),
-            nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),  # 세 번째 Conv
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(in_channels),
             nn.ReLU()
         )
@@ -172,25 +186,34 @@ class DistortionAttention(nn.Module):
 
 
     def _apply_filter(self, x, distortion_type):
-        if distortion_type in [0, 1, 2, 3, 6, 7, 12, 14, 15, 16, 18, 23, 24, 28, 33, 34, 35, 36, 37, 38, 40, 41, 42, 43]:
-            print(f"[Debug] Applying Sobel filter for distortion type: {distortion_type}")
-            return self._sobel_filter(x)  # ✅ Sobel 필터 적용 (다른 필터와 독립적으로 실행)
+        """ 왜곡 유형에 따라 적절한 필터 적용 """
+        
+        if distortion_type in [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 
+            11, 12, 13, 14, 15, 16, 17, 18, 19, 
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 
+            42, 55
+        ]:
+            print(f"[Debug] Applying Sobel filter for {distortion_type}")
+            return self._sobel_filter(x)
 
-        elif distortion_type in [4, 8, 10, 11, 13, 17, 29, 31, 32]:
-            print(f"[Debug] Applying HSV analysis for distortion type: {distortion_type}")
-            return self._hsv_analysis(x)  # ✅ HSV 필터 적용
+        elif distortion_type in [
+            20, 21, 22, 23, 24, 25, 26, 27, 28, 
+            29, 30, 31, 32
+        ]:
+            print(f"[Debug] Applying HSV analysis for {distortion_type}")
+            return self._hsv_analysis(x)
 
-        elif distortion_type == 21:
-            print(f"[Debug] Applying Histogram analysis for distortion type: {distortion_type}")
-            return self._histogram_analysis(x)  # ✅ Histogram 필터 적용
-
-        elif distortion_type in [5, 9, 19, 20, 22, 25, 26, 27, 30, 39, 44, 45, 46, 47]:
-            print(f"[Debug] Applying Fourier analysis for distortion type: {distortion_type}")
-            return self._fourier_analysis(x)  # ✅ Fourier 필터 적용
+        elif distortion_type in [
+            43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54
+        ]:
+            print(f"[Debug] Applying Fourier analysis for {distortion_type}")
+            return self._fourier_analysis(x)
 
         else:
-            print(f"[Warning] Unknown distortion type: {distortion_type}, returning original input.")
-            return x  # ✅ 필터 미적용 (원본 그대로 반환)
+            print(f"[Warning] Unknown distortion type: {distortion_type}. Returning original input.")
+            return x
+
 
 
 
@@ -246,11 +269,8 @@ class HardNegativeCrossAttention(nn.Module):
     def __init__(self, in_channels, num_heads=8):
         super(HardNegativeCrossAttention, self).__init__()
 
-        # num_heads 자동 조정
         if in_channels % num_heads != 0:
-            print(f"[경고] in_channels={in_channels}는 num_heads={num_heads}로 나눌 수 없습니다.")
             num_heads = max(1, in_channels // 8)
-            print(f"[수정] num_heads={num_heads}로 변경되었습니다.")
 
         self.num_heads = num_heads
         self.query_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
@@ -262,12 +282,21 @@ class HardNegativeCrossAttention(nn.Module):
         self.attribute_processor = AttributeFeatureProcessor(in_channels)
         self.texture_processor = TextureBlockProcessor(in_channels)
 
-        # ✅ 미리 LayerNorm 초기화
+        # ✅ 학습 가능한 α 가중치 추가
+        self.alpha = nn.Parameter(torch.tensor(0.3))  # 초기값 0.5 (0~1 범위 학습 가능)
+
+        # ✅ Scale Factor 적용 (S)
+        self.scale_factor = nn.Parameter(torch.tensor(1.0 / (in_channels ** 0.5)))
+
         self.layer_norm = nn.LayerNorm([in_channels, 1, 1])
 
     def forward(self, x_attr, x_texture):
+        # ✅ Attribute Features 변환
         x_attr = self.attribute_processor(x_attr)
+
+        # ✅ Texture Features 변환 후 추가 연산 적용
         x_texture = self.texture_processor(x_texture)
+        x_texture = x_texture * x_attr  # 🔥 **곱셈 (X 연산) 추가**
 
         if x_attr.size(2) != x_texture.size(2) or x_attr.size(3) != x_texture.size(3):
             min_h = min(x_attr.size(2), x_texture.size(2))
@@ -278,25 +307,37 @@ class HardNegativeCrossAttention(nn.Module):
         b, c, h, w = x_attr.size()
         head_dim = c // self.num_heads
 
-        multi_head_query = self.query_conv(x_attr).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
-        multi_head_key = self.key_conv(x_texture).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 2, 3)
-        multi_head_value = self.value_conv(x_texture).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
+        query_attr = self.query_conv(x_attr).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
+        key_attr = self.key_conv(x_attr).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 2, 3)
+        value_attr = self.value_conv(x_attr).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
 
-        scale = torch.sqrt(torch.tensor(head_dim, dtype=torch.float32).clamp(min=1e-6)).to(multi_head_query.device)
-        attention = self.softmax(torch.matmul(multi_head_query, multi_head_key) / scale)
-        out = torch.matmul(attention, multi_head_value).permute(0, 1, 3, 2).contiguous()
+        query_tex = self.query_conv(x_texture).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
+        key_tex = self.key_conv(x_texture).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 2, 3)
+        value_tex = self.value_conv(x_texture).view(b, self.num_heads, head_dim, h * w).permute(0, 1, 3, 2)
 
-        out = out.view(b, c, h, w)
-        out = self.output_proj(out)
-        out = nn.Dropout(p=0.1)(out) + x_attr
+        scale = self.scale_factor.to(query_attr.device)
 
-        # ✅ `self.layer_norm`이 None일 경우 즉시 생성
+        # ✅ Attribute Feature Attention
+        attention_attr = self.softmax(torch.matmul(query_attr, key_attr) * scale)
+        A_attr = torch.matmul(attention_attr, value_attr).permute(0, 1, 3, 2).contiguous()
+
+        # ✅ Texture Feature Attention
+        attention_tex = self.softmax(torch.matmul(query_tex, key_tex) * scale)
+        A_tex = torch.matmul(attention_tex, value_tex).permute(0, 1, 3, 2).contiguous()
+
+        # ✅ **α 가중치 적용**
+        A_final = self.alpha * A_attr + (1 - self.alpha) * A_tex  # 🔥 **α 적용**
+
+        A_final = A_final.view(b, c, h, w)
+        A_final = self.output_proj(A_final)
+
+        out = nn.Dropout(p=0.1)(A_final)
+
         if not hasattr(self, "layer_norm") or self.layer_norm.normalized_shape != (c, h, w):
             self.layer_norm = nn.LayerNorm([c, h, w]).to(out.device)
 
         out = self.layer_norm(out)
         return out
-
 
 
 # 시각화 함수1

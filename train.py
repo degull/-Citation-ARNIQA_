@@ -1,5 +1,5 @@
 # KADID
-""" 
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -9,7 +9,7 @@ from pathlib import Path
 from scipy import stats
 from tqdm import tqdm
 from sklearn.linear_model import Ridge
-from data import KADID10KDataset
+from data import SPAQDataset
 from models.simclr import SimCLR
 from utils.utils import parse_config
 from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
@@ -203,7 +203,7 @@ if __name__ == "__main__":
 
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
     dataset_path = Path(args.data_base_path)
-    dataset = KADID10KDataset(str(dataset_path))
+    dataset = SPAQDataset(str(dataset_path))
 
     train_size = int(0.7 * len(dataset))
     val_size = int(0.1 * len(dataset))
@@ -256,7 +256,7 @@ if __name__ == "__main__":
     print("Validation Metrics:", val_metrics)
     print("Test Metrics:", test_metrics)
 
- """
+
 
 # KONIQ
 """ 
@@ -785,7 +785,7 @@ if __name__ == "__main__":
 
 
 
-import io
+""" import io
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -1054,4 +1054,4 @@ if __name__ == "__main__":
     for i, metrics in enumerate(test_metrics, 1):
         avg_srcc = np.mean(metrics['srcc'])
         avg_plcc = np.mean(metrics['plcc'])
-        print(f"Epoch {i}: SRCC = {avg_srcc:.4f}, PLCC = {avg_plcc:.4f}")
+        print(f"Epoch {i}: SRCC = {avg_srcc:.4f}, PLCC = {avg_plcc:.4f}") """
