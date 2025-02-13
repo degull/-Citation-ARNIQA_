@@ -197,6 +197,121 @@ def test(args, model, test_dataloader, device):
     return {'srcc': avg_srocc_test, 'plcc': avg_plcc_test}
 
 
+# regressor
+def debug_ridge_regressor(embeddings, mos_scores):
+    plt.figure(figsize=(8, 6))
+    plt.scatter(embeddings[:, 0], mos_scores, alpha=0.7)
+    plt.xlabel('Embedding Feature 0')
+    plt.ylabel('MOS Scores')
+    plt.title('Embedding vs MOS Scores')
+    plt.grid()
+    plt.show()
+
+def optimize_ridge_alpha(embeddings, mos_scores):
+    param_grid = {'alpha': [0.01, 0.1, 1.0, 10.0, 100.0]}
+    ridge = Ridge()
+    grid = GridSearchCV(ridge, param_grid, scoring='r2', cv=5)
+    grid.fit(embeddings, mos_scores)
+    best_alpha = grid.best_params_['alpha']
+    print(f"Optimal alpha: {best_alpha}")
+    return Ridge(alpha=best_alpha).fit(embeddings, mos_scores)
+
+def train_ridge_regressor(model: nn.Module, train_dataloader: DataLoader, device: torch.device):
+    model.eval()
+    embeddings, mos_scores = [], []
+
+    with torch.no_grad():
+        for batch in train_dataloader:
+            inputs_A = batch["img_A"].to(device)
+            mos = batch["mos"]
+
+            # 입력이 5D 텐서일 경우 4D로 변환
+            if inputs_A.dim() == 5:
+                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # [batch_size * num_crops, channels, height, width]
+
+            features_A = model.backbone(inputs_A)
+            features_A = features_A.mean([2, 3]).cpu().numpy()  # GAP 적용
+
+            # `mos` 값 반복 (inputs_A 크기에 맞춰 조정)
+            repeat_factor = features_A.shape[0] // mos.shape[0]  # inputs_A와 mos의 크기 비율 계산
+            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)[:features_A.shape[0]]
+
+            embeddings.append(features_A)
+            mos_scores.append(mos_repeated)
+
+    # 리스트를 numpy 배열로 변환
+    embeddings = np.vstack(embeddings)
+    mos_scores = np.hstack(mos_scores)
+
+    # 크기 검증
+    assert embeddings.shape[0] == mos_scores.shape[0], \
+        f"Mismatch in embeddings ({embeddings.shape[0]}) and MOS scores ({mos_scores.shape[0]})"
+
+    from sklearn.linear_model import Ridge
+    ridge = Ridge(alpha=1.0)
+    ridge.fit(embeddings, mos_scores)
+    print("Ridge Regressor Trained: Optimal alpha=1.0")
+    return ridge
+
+
+
+
+def evaluate_ridge_regressor(regressor, model: nn.Module, dataloader: DataLoader, device: torch.device):
+    model.eval()
+    mos_scores, predictions = [], []
+
+    with torch.no_grad():
+        for batch in dataloader:
+            inputs_A = batch["img_A"].to(device)
+            mos = batch["mos"]
+
+            if inputs_A.dim() == 5:
+                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # Flatten crops if needed
+
+            # Use backbone features for Ridge prediction
+            features_A = model.backbone(inputs_A)
+            features_A = features_A.mean([2, 3]).cpu().numpy()  # GAP 적용
+
+            prediction = regressor.predict(features_A)  # Use backbone features
+            repeat_factor = features_A.shape[0] // mos.shape[0]
+            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)[:features_A.shape[0]]
+
+            predictions.extend(prediction)
+            mos_scores.extend(mos_repeated)
+
+    mos_scores = np.array(mos_scores)
+    predictions = np.array(predictions)
+    assert mos_scores.shape == predictions.shape, \
+        f"Mismatch between MOS ({mos_scores.shape}) and Predictions ({predictions.shape})"
+
+    return mos_scores, predictions
+
+
+
+
+def plot_results(mos_scores, predictions):
+    assert mos_scores.shape == predictions.shape, "mos_scores and predictions must have the same shape"
+    plt.figure(figsize=(8, 6))
+    plt.scatter(mos_scores, predictions, alpha=0.7, label='Predictions vs MOS')
+    plt.plot([min(mos_scores), max(mos_scores)], [min(mos_scores), max(mos_scores)], 'r--', label='Ideal')
+    plt.xlabel('Ground Truth MOS')
+    plt.ylabel('Predicted MOS')
+    plt.title('Ridge Regressor Performance')
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+def debug_embeddings(embeddings, title="Embeddings"):
+    plt.figure(figsize=(8, 6))
+    plt.hist(embeddings.flatten(), bins=50, alpha=0.7)
+    plt.title(f"{title} Distribution")
+    plt.xlabel("Embedding Value")
+    plt.ylabel("Frequency")
+    plt.grid()
+    plt.show()
+
+
+
 if __name__ == "__main__":
     config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
     args = load_config(config_path)
@@ -784,8 +899,8 @@ if __name__ == "__main__":
 
 
 
-
-""" import io
+""" 
+import io
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -795,7 +910,7 @@ from pathlib import Path
 from scipy import stats
 from tqdm import tqdm
 from sklearn.linear_model import Ridge
-from data import KONIQ10KDataset, LIVEDataset
+from data import KADID10KDataset, CSIQDataset
 from models.simclr import SimCLR
 from utils.utils import parse_config
 from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
@@ -988,26 +1103,28 @@ def test(args, model, test_dataloader, device):
     return {'srcc': avg_srocc_test, 'plcc': avg_plcc_test}
 
 
+
+
 if __name__ == "__main__":
     config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
     args = load_config(config_path)
 
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
-    # TID2013Dataset 경로 설정 및 로드
-    koniq_dataset_path = Path(str(args.data_base_path_koniq))
-    print(f"[Debug] koniq Dataset Path: {koniq_dataset_path}")
-    koniq_dataset = KONIQ10KDataset(str(koniq_dataset_path))
+    # KADID10KDataset 경로 설정 및 로드
+    kadid_dataset_path = Path(str(args.data_base_path_kadid))
+    print(f"[Debug] kadid Dataset Path: {kadid_dataset_path}")
+    kadid_dataset = KADID10KDataset(str(kadid_dataset_path))
 
-    # LIVEDataset 경로 설정 및 로드
-    live_dataset_path = Path(str(args.data_base_path_live))
-    print(f"[Debug] live Dataset Path: {live_dataset_path}")
-    live_dataset = LIVEDataset(str(live_dataset_path))
+    # CSIQDataset 경로 설정 및 로드
+    csiq_dataset_path = Path(str(args.data_base_path_csiq))
+    print(f"[Debug] csiq Dataset Path: {csiq_dataset_path}")
+    csiq_dataset = CSIQDataset(str(csiq_dataset_path))
 
     # 훈련 데이터 분할
-    train_size = int(0.8 * len(koniq_dataset))
-    val_size = len(koniq_dataset) - train_size
-    train_dataset, val_dataset = random_split(koniq_dataset, [train_size, val_size])
+    train_size = int(0.8 * len(kadid_dataset))
+    val_size = len(kadid_dataset) - train_size
+    train_dataset, val_dataset = random_split(kadid_dataset, [train_size, val_size])
 
     train_dataloader = DataLoader(
         train_dataset, batch_size=args.training.batch_size, shuffle=True, num_workers=4
@@ -1018,7 +1135,7 @@ if __name__ == "__main__":
 
     # 테스트 데이터 로드
     test_dataloader = DataLoader(
-        live_dataset, batch_size=args.test.batch_size, shuffle=False, num_workers=4
+        csiq_dataset, batch_size=args.test.batch_size, shuffle=False, num_workers=4
     )
 
     # 모델 초기화
@@ -1049,7 +1166,7 @@ if __name__ == "__main__":
     )
 
     # 최종 결과 출력
-    print("CSIQ & LIVE")
+    print("LIVE & KONIQ")
     print("\nFinal Test Metrics Per Epoch:")
     for i, metrics in enumerate(test_metrics, 1):
         avg_srcc = np.mean(metrics['srcc'])

@@ -12,24 +12,30 @@ import io
 
 # 왜곡 유형 매핑
 distortion_types_mapping = {
-    1: "awgn",
-    2: "blur",
-    3: "contrast",
-    4: "jpeg",
-    5: "jpeg2000",
-    6: "fnoise"
+    1: "low-light_noise",    # 저조도 노이즈
+    2: "motion_blur",        # 움직임 블러
+    3: "underexposure",      # 노출 부족
+    4: "overexposure",       # 과노출
+    5: "jpeg_artifacts",     # JPEG 압축 아티팩트
+    6: "banding_artifacts",  # 색상 띠 노이즈
+    7: "color_shift",        # 색상 이동
+    8: "chromatic_aberration" # 색 수차
 }
+
 
 # 강도 레벨 정의
 def get_distortion_levels():
     return {
-        'awgn': [5, 10, 15, 20, 25],
-        'blur': [1, 2, 3, 4, 5],
-        'contrast': [0.5, 0.7, 0.9, 1.1, 1.3],
-        'jpeg': [10, 20, 30, 40, 50],
-        'jpeg2000': [10, 20, 30, 40, 50],
-        'fnoise': [1, 2, 3, 4, 5]
+        "low-light_noise": [5, 10, 15, 20, 25],
+        "motion_blur": [1, 2, 3, 4, 5],
+        "underexposure": [0.5, 0.7, 0.9, 1.1, 1.3],
+        "overexposure": [0.5, 0.7, 0.9, 1.1, 1.3],
+        "jpeg_artifacts": [10, 20, 30, 40, 50],
+        "banding_artifacts": [1, 2, 3, 4, 5],
+        "color_shift": [10, 20, 30, 40, 50],
+        "chromatic_aberration": [1, 2, 3, 4, 5]
     }
+
 
 
 class KONIQ10KDataset(Dataset):
@@ -80,43 +86,53 @@ class KONIQ10KDataset(Dataset):
         ])(image)
 
     def apply_distortion(self, image, distortion, level):
+        """ 지정된 왜곡 유형과 강도로 이미지를 변환 """
+        image = image.convert("RGB")
+
         try:
-            image = image.convert("RGB")  # RGB 변환
+            if distortion == "low-light_noise":
+                image_array = np.array(image, dtype=np.float32) * (1 - level * 0.05)
+                noise = np.random.normal(loc=0, scale=level * 10, size=image_array.shape).astype(np.float32)
+                image = Image.fromarray(np.clip(image_array + noise, 0, 255).astype(np.uint8))
 
-            if distortion == "awgn":
-                image_array = np.array(image, dtype=np.float32)
-                noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
-                noisy_image = np.clip(image_array + noise, 0, 255).astype(np.uint8)
-                image = Image.fromarray(noisy_image)
-
-            elif distortion == "blur":
+            elif distortion == "motion_blur":
                 image = image.filter(ImageFilter.GaussianBlur(radius=level))
 
-            elif distortion == "contrast":
-                enhancer = ImageEnhance.Contrast(image)
-                image = enhancer.enhance(level)
+            elif distortion == "underexposure":
+                enhancer = ImageEnhance.Brightness(image)
+                image = enhancer.enhance(1 - level * 0.1)
 
-            elif distortion == "jpeg2000":
-                image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
+            elif distortion == "overexposure":
+                enhancer = ImageEnhance.Brightness(image)
+                image = enhancer.enhance(1 + level * 0.1)
 
-            elif distortion == "jpeg":
-                quality = max(1, min(100, int(100 - (level * 100))))
+            elif distortion == "jpeg_artifacts":
                 buffer = io.BytesIO()
-                image.save(buffer, format="JPEG", quality=quality)
+                image.save(buffer, format="JPEG", quality=max(1, min(100, 100 - level * 10)))
                 buffer.seek(0)
-                return Image.open(buffer)
+                image = Image.open(buffer)
 
-            elif distortion == "fnoise":
+            elif distortion == "banding_artifacts":
+                bands = np.linspace(0, 255, num=int(level * 10))
                 image_array = np.array(image, dtype=np.float32)
-                noise = np.random.normal(0, level * 255, image_array.shape).astype(np.float32)
-                noisy_image = np.clip(image_array + noise, 0, 255).astype(np.uint8)
-                image = Image.fromarray(noisy_image)
+                for i in range(image_array.shape[0]):
+                    image_array[i, :, :] = bands[int((i / image_array.shape[0]) * len(bands))]
+                image = Image.fromarray(np.clip(image_array, 0, 255).astype(np.uint8))
 
-            else:
-                print(f"[Warning] Distortion type '{distortion}' not implemented.")
+            elif distortion == "color_shift":
+                shift = np.random.randint(-level, level, (1, 1, 3))
+                image_array = np.array(image).astype(np.float32) + shift
+                image = Image.fromarray(np.clip(image_array, 0, 255).astype(np.uint8))
+
+            elif distortion == "chromatic_aberration":
+                image_array = np.array(image, dtype=np.float32)
+                shift = int(level * 5)
+                image_array[:, :-shift, 0] = image_array[:, shift:, 0]
+                image_array[:, shift:, 2] = image_array[:, :-shift, 2]
+                image = Image.fromarray(np.clip(image_array, 0, 255).astype(np.uint8))
 
         except Exception as e:
-            print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
+            print(f"[Error] {distortion} 적용 중 오류 발생: {e}")
 
         return image
 
