@@ -36,9 +36,10 @@ def get_distortion_levels():
 
 
 class SPAQDataset(Dataset):
-    def __init__(self, root: str, crop_size: int = 224):
+    def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         super().__init__()
         self.root = str(root)
+        self.phase = phase
         self.crop_size = crop_size
         self.distortion_levels = get_distortion_levels()
 
@@ -55,21 +56,13 @@ class SPAQDataset(Dataset):
             os.path.join(self.root, "TestImage", img) for img in self.images
         ]
 
-        # 기본 변환 정의
-        self.transform = transforms.Compose([
-            transforms.Resize((self.crop_size, self.crop_size)),
-            transforms.ToTensor(),
-        ])
-
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
             transforms.Resize((self.crop_size, self.crop_size)),
             transforms.ToTensor(),
         ])(image)
 
-
-
-    def apply_distortion(image, distortion, level):
+    def apply_distortion(self, image, distortion, level):
 
         try:
             image = image.convert("RGB")  # RGB 변환
@@ -123,35 +116,45 @@ class SPAQDataset(Dataset):
             levels = [random.choice(self.distortion_levels[distortion]) for distortion in distortions]
 
         for distortion, level in zip(distortions, levels):
-            #print(f"[Debug] Applying distortion: {distortion} with level: {level}")
+            print(f"[Debug] Applying distortion: {distortion} with level: {level}")
             try:
                 image = self.apply_distortion(image, distortion, level)
             except Exception as e:
-                #print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
+                print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
                 continue
         return image
     
 
     def __getitem__(self, index: int):
         try:
-            img_orig = Image.open(self.image_paths[index]).convert("RGB")
+            img_A_orig = Image.open(self.image_paths[index]).convert("RGB")
         except Exception as e:
             print(f"[Error] Loading image: {self.image_paths[index]}: {e}")
             return None
 
-        distortions = random.sample(list(self.distortion_levels.keys()), 1)
-        levels = [random.choice(self.distortion_levels[distortions[0]])]
+        # 📌 img_B를 reference 이미지로 설정 → img_A에서 랜덤한 왜곡 적용
+        distortions_A = random.sample(list(self.distortion_levels.keys()), 1)[0]
+        level_A = random.choice(self.distortion_levels[distortions_A])
 
-        img_distorted = self.apply_random_distortions(img_orig, distortions, levels)
+        distortions_B = random.sample(list(self.distortion_levels.keys()), 1)[0]
+        level_B = random.choice(self.distortion_levels[distortions_B])
 
-        img_orig = self.transform(img_orig)
-        img_distorted = self.transform(img_distorted)
+        print(f"[Debug] img_A: {distortions_A} (level: {level_A}), img_B: {distortions_B} (level: {level_B})")
+
+        img_A_distorted = self.apply_distortion(img_A_orig, distortions_A, level_A)
+        img_B_distorted = self.apply_distortion(img_A_orig, distortions_B, level_B)  # 다른 왜곡 적용
+
+        img_A_orig = self.transform(img_A_orig)
+        img_A_distorted = self.transform(img_A_distorted)
+        img_B_distorted = self.transform(img_B_distorted)
 
         return {
-            "img_A": img_orig,
-            "img_B": img_distorted,
+            "img_A": torch.stack([img_A_orig, img_A_distorted]),
+            "img_B": torch.stack([img_A_orig, img_B_distorted]),
             "mos": torch.tensor(self.mos[index], dtype=torch.float32),
         }
+
+    
 
     def __len__(self):
         return len(self.images)
