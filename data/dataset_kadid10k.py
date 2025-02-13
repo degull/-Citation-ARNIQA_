@@ -565,8 +565,8 @@ class KADID10KDataset:
 
     def __getitem__(self, index: int):
         try:
-            img_A_orig = Image.open(self.image_paths[index]).convert("RGB")  # ✅ KADID10K의 왜곡된 이미지 사용
-            img_B_orig = Image.open(self.reference_paths[index]).convert("RGB")  # ✅ KADID10K의 원본 이미지 사용
+            img_A_orig = Image.open(self.image_paths[index]).convert("RGB")  # ✅ KADID10K의 기존 왜곡된 이미지
+            img_B_orig = Image.open(self.reference_paths[index]).convert("RGB")  # ✅ KADID10K의 원본 이미지
         except Exception as e:
             print(f"[Error] Loading image: {self.image_paths[index]} or {self.reference_paths[index]}: {e}")
             return None
