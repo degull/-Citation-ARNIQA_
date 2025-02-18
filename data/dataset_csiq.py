@@ -151,12 +151,12 @@ from PIL import ImageEnhance, ImageFilter, Image
 
 # ✅ CSIQ 데이터셋의 왜곡 유형 매핑
 distortion_types_mapping = {
-    "AWGN": "awgn",
-    "BLUR": "blur",
-    "contrast": "contrast",
-    "fnoise": "fnoise",
-    "JPEG": "jpeg",
-    "jpeg2000": "jpeg2000"
+    1 : "awgn", 
+    2 : "blur",
+    3 : "contrast",
+    4 : "fnoise",
+    5 : "jpeg",
+    6 : "jpeg2000"
 }
 
 # ✅ 강도 레벨 정의

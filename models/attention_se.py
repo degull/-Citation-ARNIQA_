@@ -13,86 +13,117 @@ from PIL import ImageEnhance, ImageFilter, Image
 import matplotlib.pyplot as plt
 from torchvision import transforms
 
-
-
 distortion_map = {
-    # ✅ JPEG 압축 관련 (Sobel)
-    "jpeg": 0,  
-    "jpeg2000": 1,    
-    "jpeg_artifacts": 2,
-    "jpeg_transmission_errors": 3,
-    "jpeg2000_transmission_errors": 4,
+    # ✅ CSIQ
+    "awgn": 0,                     # 🟠 Sobel (노이즈 패턴 탐지)
+    "blur": 1,                     # 🟠 Sobel (경계 흐림 탐지)
+    "contrast": 2,                 # 🟡 HSV / Histogram (명암 대비 분석)
+    "fnoise": 3,                   # 🟠 Sobel (노이즈 패턴 탐지)
+    "jpeg": 4,                     # 🟢 Fourier (압축 인공물 분석)
+    "jpeg2000": 5,                 # 🟢 Fourier (압축 인공물 분석)
 
-    # ✅ 블러 관련 (Sobel)
-    "gaussian_blur": 5,  
-    "lens_blur": 6,
-    "motion_blur": 7,
-    "blur": 8,
+    # ✅ KADID
+    "gaussian_blur": 6,            # 🟠 Sobel (경계 흐림 탐지)
+    "lens_blur": 7,                # 🟠 Sobel (경계 흐림 탐지)
+    "motion_blur": 8,              # 🟠 Sobel (모션 흐림 탐지)
+    "color_diffusion": 9,          # 🟡 HSV (색상 확산 분석)
+    "color_shift": 10,             # 🟡 HSV (색상 변화 탐지)
+    "color_quantization": 11,      # 🟢 Fourier (양자화 패턴 분석)
+    "color_saturation_1": 12,      # 🟡 HSV (채도 분석)
+    "color_saturation_2": 13,      # 🟡 HSV (채도 분석)
+    "jpeg2000": 14,                # 🟢 Fourier (압축 인공물 분석)
+    "jpeg": 15,                    # 🟢 Fourier (압축 인공물 분석)
+    "white_noise": 16,             # 🟠 Sobel (노이즈 패턴 탐지)
+    "white_noise_color_component": 17,  # 🟠 Sobel (컬러 노이즈 패턴 탐지)
+    "impulse_noise": 18,           # 🟠 Sobel (잡음 점 탐지)
+    "multiplicative_noise": 19,    # 🟠 Sobel (노이즈 패턴 탐지)
+    "denoise": 20,                 # 🟡 Histogram (노이즈 제거 후 대비 분석)
+    "brighten": 21,                # 🟡 HSV / Histogram (밝기 변화 분석)
+    "darken": 22,                  # 🟡 HSV / Histogram (명암 분석)
+    "mean_shift": 23,              # 🟢 Fourier (평균 이동으로 인한 주파수 변화 탐지)
+    "jitter": 24,                  # 🟠 Sobel (무작위 노이즈 패턴 분석)
+    "non_eccentricity_patch": 25,  # 🟠 Sobel (패치 경계 분석)
+    "pixelate": 26,                # 🟢 Fourier (픽셀화 주파수 패턴 분석)
+    "quantization": 27,            # 🟢 Fourier (양자화 주파수 패턴 분석)
+    "color_block": 28,             # 🟢 Fourier (색상 블록 주파수 분석)
+    "high_sharpen": 29,            # 🟠 Sobel (과도한 경계 강조 탐지)
+    "contrast_change": 30,         # 🟡 HSV / Histogram (명암 대비 분석)
 
-    # ✅ 노이즈 관련 (Sobel)
-    "white_noise": 9,
-    "awgn": 10,   
-    "impulse_noise": 11,  
-    "multiplicative_noise": 12,
-    "additive_gaussian_noise": 13,
-    "additive_noise_in_color_components": 14,
-    "spatially_correlated_noise": 15,
-    "masked_noise": 16,
-    "high_frequency_noise": 17,
-    "comfort_noise": 18,
-    "lossy_compression_of_noisy_images": 19,
-    "low-light_noise": 20,  # 저조도 노이즈
-    "color_noise": 21,  # 색상 노이즈
+    # ✅ KONIQ
+    "low-light_noise": 31,         # 🟠 Sobel (저조도 노이즈 패턴 분석)
+    "underexposure": 32,           # 🟡 Histogram (저노출 분석)
+    "overexposure": 33,            # 🟡 Histogram (과노출 분석)
+    "sensor_noise": 34,            # 🟠 Sobel (센서 노이즈 패턴 탐지)
+    "banding_artifacts": 35,       # 🟢 Fourier (줄무늬 인공물 분석)
+    "chromatic_aberration": 36,    # 🟡 HSV (색수차 탐지)
+    "camera_motion_blur": 37,      # 🟠 Sobel (모션 흐림 분석)
+    "moving_object_blur": 38,      # 🟠 Sobel (움직이는 객체 흐림 분석)
+    "mixture_distortions": 39,     # 🟢 Fourier (복합 주파수 패턴 분석)
 
-    # ✅ 대비 및 색상 관련 (HSV)
-    "contrast_change": 22,
-    "contrast": 23,
-    "brightness": 24,
-    "colorfulness": 25,
-    "sharpness": 26,
-    "exposure": 27,
-    "overexposure": 28,
-    "underexposure": 29,
-    "color_shift": 30,
-    "color_saturation_1": 31,
-    "color_saturation_2": 32,
-    "change_of_color_saturation": 33,
-    "white_balance_error": 34,
+    # ✅ LIVE-Challenge
+    "brightness": 40,              # 🟡 HSV / Histogram (밝기 변화 분석)
+    "exposure": 41,                # 🟡 HSV / Histogram (노출 분석)
+    "colorfulness": 42,            # 🟡 HSV (색조 및 채도 분석)
+    "color_shift": 43,             # 🟡 HSV (색상 이동 탐지)
+    "white_balance_error": 44,     # 🟡 HSV (색 온도 분석)
+    "sharpness": 45,               # 🟠 Sobel (선명도 및 경계 분석)
+    "motion_blur": 46,             # 🟠 Sobel (모션 흐림 탐지)
+    "glare": 47,                   # 🟡 Histogram (조명 반사 패턴 분석)
+    "haze": 48,                    # 🟡 Histogram / Fourier (흐림 및 저주파 분석)
+    "low-light_noise": 49,         # 🟠 Sobel (저조도 노이즈 분석)
+    "color_noise": 50,             # 🟡 HSV (컬러 노이즈 분석)
+    "vignetting": 51,              # 🟡 Histogram (비네팅 밝기 패턴 분석)
+    "distortion": 52,              # 🟢 Fourier (렌즈 왜곡 주파수 분석)
 
-    # ✅ 공간적 왜곡 관련 (Sobel)
-    "fnoise": 35,
-    "fast_fading": 36,
-    "color_diffusion": 37,
-    "mean_shift": 38,
-    "jitter": 39,
-    "non_eccentricity_patch": 40,
-    "pixelate": 41,
-    "spatial_noise": 42,
-    "non_eccentricity_pattern_noise": 43,
-    "local_block_wise_distortions": 44,
+    # ✅ SPAQ
+    "under_exposure": 53,          # 🟡 Histogram (저노출 분석)
+    "over_exposure": 54,           # 🟡 Histogram (과노출 분석)
+    "sensor_noise": 55,            # 🟠 Sobel (센서 노이즈 분석)
+    "contrast_reduction": 56,      # 🟡 Histogram (대비 감소 분석)
+    "out_of_focus": 57,            # 🟠 Sobel (초점 흐림 탐지)
+    "camera_motion_blur": 58,      # 🟠 Sobel (카메라 모션 흐림 탐지)
+    "moving_object_blur": 59,      # 🟠 Sobel (움직이는 객체 흐림 탐지)
+    "mixture_distortions": 60,     # 🟢 Fourier (복합 왜곡 주파수 분석)
 
-    # ✅ 양자화 및 압축 관련 (Fourier)
-    "quantization": 45,
-    "color_quantization": 46,
-    "image_color_quantization_with_dither": 47,
-    "color_block": 48,
-    "sparse_sampling_and_reconstruction": 49,
-
-    # ✅ 영상 왜곡 (Fourier)
-    "glare": 50,
-    "haze": 51,
-    "banding_artifacts": 52,
-    "vignetting": 53,
-    "chromatic_aberration": 54,
-    "distortion": 55,
-    "high_sharpen": 56,
-    "image_denoising": 57
+    # ✅ TID
+    "additive_gaussian_noise": 61,              # 🟠 Sobel (노이즈 패턴 분석)
+    "additive_noise_in_color_components": 62,   # 🟡 HSV (컬러 노이즈 분석)
+    "spatially_correlated_noise": 63,           # 🟠 Sobel (공간적 상관 노이즈 탐지)
+    "masked_noise": 64,                         # 🟡 Histogram (노이즈 마스킹 분석)
+    "high_frequency_noise": 65,                 # 🟢 Fourier (고주파 노이즈 분석)
+    "impulse_noise": 66,                        # 🟠 Sobel (임펄스 노이즈 탐지)
+    "quantization_noise": 67,                   # 🟢 Fourier (양자화 노이즈 분석)
+    "image_denoising": 68,                      # 🟡 Histogram (노이즈 제거 후 분석)
+    "jpeg_compression": 69,                     # 🟢 Fourier (JPEG 압축 패턴 분석)
+    "jpeg2000_compression": 70,                 # 🟢 Fourier (JPEG2000 압축 분석)
+    "jpeg_transmission_errors": 71,             # 🟢 Fourier (전송 오류 분석)
+    "jpeg2000_transmission_errors": 72,         # 🟢 Fourier (전송 오류 분석)
+    "non_eccentricity_pattern_noise": 73,       # 🟠 Sobel (패턴 노이즈 탐지)
+    "local_block_wise_distortions": 74,         # 🟢 Fourier (블록 기반 왜곡 분석)
+    "mean_shift": 75,                           # 🟢 Fourier (평균 이동 주파수 분석)
+    "change_of_color_saturation": 76,           # 🟡 HSV (채도 변화 탐지)
+    "multiplicative_gaussian_noise": 77,        # 🟠 Sobel (다중 노이즈 탐지)
+    "comfort_noise": 78,                        # 🟠 Sobel (부드러운 노이즈 패턴 분석)
+    "lossy_compression_of_noisy_images": 79,    # 🟢 Fourier (손실 압축 패턴 분석)
+    "image_color_quantization_with_dither": 80, # 🟢 Fourier (컬러 양자화 분석)
+    "sparse_sampling_and_reconstruction": 81,   # 🟢 Fourier (희소 샘플링 주파수 분석)
+    "chromatic_aberrations": 82,                # 🟡 HSV (색수차 탐지)
 }
 
+# ✅ 필터 유형 요약:
+# 🟠 Sobel: 경계, 노이즈, 블러 탐지
+# 🟡 HSV / Histogram: 밝기, 채도, 대비 및 색상 변화 분석
+# 🟢 Fourier: 압축 인공물, 고주파/저주파 패턴 분석
+
+
+# ✅ 출력
+""" for distortion, idx in distortion_map.items():
+    print(f"{idx}: {distortion}")
+ """
 
 
 class DistortionClassifier(nn.Module):
-    def __init__(self, in_channels, num_distortions=58):
+    def __init__(self, in_channels, num_distortions=83):
         super(DistortionClassifier, self).__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1),
@@ -178,12 +209,20 @@ class DistortionAttention(nn.Module):
         # ✅ Specialized Filter 적용
         filtered_tensors = []
         for i, dt in enumerate(distortion_types):
-            filtered_x = self._apply_filter(x[i].unsqueeze(0), dt)
+            filtered_output = self._apply_filter(x[i].unsqueeze(0), dt)
+            
+            # 튜플 반환 시 첫 번째 요소만 사용
+            if isinstance(filtered_output, tuple):
+                filtered_x = filtered_output[0]
+            else:
+                filtered_x = filtered_output
+
             if filtered_x.shape[1] == 1:
                 filtered_x = filtered_x.expand(-1, self.expected_channels, -1, -1)
             filtered_tensors.append(filtered_x)
-        
+
         filtered_x = torch.cat(filtered_tensors, dim=0)
+
         
         # ✅ Attention Map과 필터 적용 정보 결합
         feature_map = attention_map + filtered_x  # 🔥 Feature Map 생성 방식 변경
@@ -194,33 +233,50 @@ class DistortionAttention(nn.Module):
 
     def _apply_filter(self, x, distortion_type):
         """ 왜곡 유형에 따라 적절한 필터 적용 """
-
+        
+        # ✅ Sobel 필터 (경계 탐지 및 노이즈, 블러 분석)
         if distortion_type in [
-            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 
-            11, 12, 13, 14, 15, 16, 17, 18, 19, 
-            35, 36, 37, 38, 39, 40, 41, 42, 43, 
-            44, 57
+            0, 1, 3, 5, 6, 7, 8, 9, 10, 
+            11, 12, 13, 14, 15, 16, 17, 18, 
+            19, 24, 25, 26, 31, 34, 37, 
+            38, 39, 40, 41, 43, 45, 46, 50, 
+            55, 57, 59, 63, 64, 65, 66, 
+            73
         ]:
             print(f"[Debug] Applying Sobel filter for {distortion_type}")
-            return self._sobel_filter(x)  # ✅ Sobel 필터 적용
+            return self._sobel_filter(x)
 
+        # ✅ HSV/Histogram 분석 (색상, 명암, 밝기, 대비 탐지)
         elif distortion_type in [
-            22, 23, 24, 25, 26, 27, 28, 29, 30, 
-            31, 32, 33, 34
+            2, 4, 10, 20, 21, 22, 23, 27, 
+            28, 29, 30, 32, 33, 35, 42, 
+            44, 47, 48, 49, 51, 53, 54, 
+            56, 60, 62, 68, 76
         ]:
-            print(f"[Debug] Applying HSV analysis for {distortion_type}")
-            return self._hsv_analysis(x)  # ✅ HSV 필터 적용
+            print(f"[Debug] Applying HSV/Histogram analysis for {distortion_type}")
+            return self._hsv_analysis(x) if distortion_type not in [20, 21, 51, 53, 56, 60] else self._histogram_analysis(x)
 
+        # ✅ Fourier 분석 (압축 인공물 및 주파수 도메인 분석)
         elif distortion_type in [
-            45, 46, 47, 48, 49, 50, 51, 52, 53, 
-            54, 55, 56
+            4, 14, 15, 45, 46, 47, 48, 49, 
+            50, 52, 54, 58, 61, 67, 69, 
+            70, 71, 72, 74, 75, 77, 78, 
+            79, 80, 81
         ]:
             print(f"[Debug] Applying Fourier analysis for {distortion_type}")
-            return self._fourier_analysis(x)  # ✅ Fourier 필터 적용
+            return self._fourier_analysis(x)
+
+        # ✅ Histogram 분석 (노출 및 밝기 변화 분석)
+        elif distortion_type in [
+            20, 21, 51, 53, 56, 60
+        ]:
+            print(f"[Debug] Applying Histogram analysis for {distortion_type}")
+            return self._histogram_analysis(x)
 
         else:
             print(f"[Warning] Unknown distortion type: {distortion_type}. Returning original input.")
             return x
+
 
 
     def _sobel_filter(self, x):

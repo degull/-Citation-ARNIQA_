@@ -7,7 +7,7 @@ import os
 import numpy as np
 
 from train import train  # train 함수는 이미 수정한 train.py에서 호출됨
-from run_test import test  # test 함수는 모델 평가에 사용
+#from run_test import test  # test 함수는 모델 평가에 사용
 from models.simclr import SimCLR  # SimCLR 모델 정의
 from data import KADID10KDataset  # 데이터셋 정의
 from utils.utils import PROJECT_ROOT, parse_config, parse_command_line_args, merge_configs  # 유틸리티 함수들
