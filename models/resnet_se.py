@@ -302,7 +302,7 @@ class ResNetSEVisualizer(nn.Module):
         self.hard_negative_attention = hard_negative_attention
         self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-    def forward(self, x):
+    def forward(self, x, original_image=None):
         """Feature visualization forward pass"""
         activation_maps = {}
 
@@ -344,6 +344,10 @@ class ResNetSEVisualizer(nn.Module):
         # Global Avg Pooling 적용 후 벡터 출력
         x = self.global_avg_pool(x)
         activation_maps["GlobalAvgPool"] = x
+
+        # ✅ original_image가 주어진 경우 추가적인 처리 가능
+        if original_image is not None:
+            activation_maps["OriginalImage"] = original_image
 
         return activation_maps
 

@@ -1,5 +1,5 @@
 # KADID
-""" 
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -9,7 +9,7 @@ from pathlib import Path
 from scipy import stats
 from tqdm import tqdm
 from sklearn.linear_model import Ridge
-from data import CSIQDataset
+from data import KADID10KDataset
 from models.simclr import SimCLR
 from utils.utils import parse_config
 from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
@@ -318,7 +318,7 @@ if __name__ == "__main__":
 
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
     dataset_path = Path(args.data_base_path)
-    dataset = CSIQDataset(str(dataset_path))
+    dataset = KADID10KDataset(str(dataset_path))
 
     train_size = int(0.7 * len(dataset))
     val_size = int(0.1 * len(dataset))
@@ -371,7 +371,7 @@ if __name__ == "__main__":
     print("Validation Metrics:", val_metrics)
     print("Test Metrics:", test_metrics)
 
- """
+
 
 # KONIQ
 """ 
@@ -641,7 +641,8 @@ if __name__ == "__main__":
 
 
 # 오버레이 시각화
-""" import torch
+""" 
+import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -674,7 +675,7 @@ from torchvision import transforms
 from models.attention_se import DistortionAttention, HardNegativeCrossAttention
 from models.resnet_se import SEBlock, ResNetSEVisualizer, ResNetSE
 from utils.utils_visualization import visualize_feature_maps
-
+from PIL import Image
 
 # Config loader
 def load_config(config_path: str) -> DotMap:
@@ -851,8 +852,10 @@ if __name__ == "__main__":
     from PIL import Image
     import torchvision.transforms as transforms
 
+
+
     # ✅ 원본 이미지 로드
-    input_image_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013/distorted_images/i02_04_5.bmp"
+    input_image_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013/reference_images/I23.BMP"
     input_image = Image.open(input_image_path).convert("RGB")
 
     # ✅ 이미지 변환 (224x224)
@@ -885,13 +888,18 @@ if __name__ == "__main__":
         activation_maps = model(input_tensor, original_image=input_image)  # 🔥 원본 이미지 추가 전달
 
     # 🔍 Feature Map Shape 확인 (디버깅)
-    for layer, fmap in activation_maps.items():
-        print(f"{layer}: {fmap.shape}")
+    for layer_name, feature_map in activation_maps.items():
+        if isinstance(feature_map, torch.Tensor):
+            print(f"[Debug] {layer_name} Feature Map Shape: {feature_map.shape}")  # ✅ Tensor일 경우 .shape 사용
+        elif isinstance(feature_map, Image.Image):
+            print(f"[Debug] {layer_name} Feature Map Size: {feature_map.size}")   # ✅ PIL.Image일 경우 .size 사용
+        else:
+            print(f"[Debug] {layer_name}: Unknown type {type(feature_map)}")  # 예외 처리
 
     # ✅ 시각화 실행
     visualize_feature_maps(activation_maps, input_image)
- """
 
+ """
 
 
 
@@ -900,7 +908,7 @@ if __name__ == "__main__":
 
 
 
-import io
+""" import io
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -910,7 +918,7 @@ from pathlib import Path
 from scipy import stats
 from tqdm import tqdm
 from sklearn.linear_model import Ridge
-from data import KONIQ10KDataset, SPAQDataset
+from data import KADID10KDataset, KONIQ10KDataset
 from models.simclr import SimCLR
 from utils.utils import parse_config
 from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
@@ -1111,20 +1119,20 @@ if __name__ == "__main__":
 
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
+    # KADID10KDataset 경로 설정 및 로드
+    kadid_dataset_path = Path(str(args.data_base_path_kadid))
+    print(f"[Debug] kadid Dataset Path: {kadid_dataset_path}")
+    kadid_dataset = KADID10KDataset(str(kadid_dataset_path))
+
     # KONIQ10KDataset 경로 설정 및 로드
     koniq_dataset_path = Path(str(args.data_base_path_koniq))
     print(f"[Debug] koniq Dataset Path: {koniq_dataset_path}")
     koniq_dataset = KONIQ10KDataset(str(koniq_dataset_path))
 
-    # LIVEDataset 경로 설정 및 로드
-    spaq_dataset_path = Path(str(args.data_base_path_spaq))
-    print(f"[Debug] spaq Dataset Path: {spaq_dataset_path}")
-    spaq_dataset = SPAQDataset(str(spaq_dataset_path))
-
     # 훈련 데이터 분할
-    train_size = int(0.8 * len(koniq_dataset))
-    val_size = len(koniq_dataset) - train_size
-    train_dataset, val_dataset = random_split(koniq_dataset, [train_size, val_size])
+    train_size = int(0.8 * len(kadid_dataset))
+    val_size = len(kadid_dataset) - train_size
+    train_dataset, val_dataset = random_split(kadid_dataset, [train_size, val_size])
 
     train_dataloader = DataLoader(
         train_dataset, batch_size=args.training.batch_size, shuffle=True, num_workers=4
@@ -1135,7 +1143,7 @@ if __name__ == "__main__":
 
     # 테스트 데이터 로드
     test_dataloader = DataLoader(
-        spaq_dataset, batch_size=args.test.batch_size, shuffle=False, num_workers=4
+        koniq_dataset, batch_size=args.test.batch_size, shuffle=False, num_workers=4
     )
 
     # 모델 초기화
@@ -1166,9 +1174,10 @@ if __name__ == "__main__":
     )
 
     # 최종 결과 출력
-    print("KONIQ & SPAQ")
+    print("KADID & KONIQ")
     print("\nFinal Test Metrics Per Epoch:")
     for i, metrics in enumerate(test_metrics, 1):
         avg_srcc = np.mean(metrics['srcc'])
         avg_plcc = np.mean(metrics['plcc'])
-        print(f"Epoch {i}: SRCC = {avg_srcc:.4f}, PLCC = {avg_plcc:.4f}")
+        print(f"Epoch {i}: SRCC = {avg_srcc:.4f}, PLCC = {avg_plcc:.4f}") """
+
