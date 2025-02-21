@@ -60,6 +60,7 @@ def validate(args, model, dataloader, device):
 
     return np.mean(srocc_values), np.mean(plcc_values)
 
+
 def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, device):
     checkpoint_path = Path(str(args.checkpoint_base_path))
     checkpoint_path.mkdir(parents=True, exist_ok=True)
@@ -68,6 +69,8 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
     train_losses = []
     val_srocc_values, val_plcc_values = [], []
     test_srocc_values, test_plcc_values = [], []
+
+    print("\n🔹 **Training Start** 🔹")
 
     for epoch in range(args.training.epochs):
         model.train()
@@ -82,6 +85,7 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
                 inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
                 inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
 
+            # ✅ Hard Negative 샘플 생성
             hard_negatives = generate_hard_negatives(inputs_B, scale_factor=0.5)
 
             if hard_negatives.dim() == 5:
@@ -92,13 +96,11 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
             optimizer.zero_grad()
 
             with torch.amp.autocast(device_type="cuda"):
-
-
                 proj_A, proj_B = model(inputs_A, inputs_B)
 
                 proj_A, proj_B = F.normalize(proj_A, dim=1), F.normalize(proj_B, dim=1)
 
-                # Hard Negative Feature Backbone 통과
+                # ✅ Hard Negative Feature Backbone 통과
                 features_negatives = model.backbone(hard_negatives)
                 if features_negatives.dim() == 4:
                     features_negatives = features_negatives.mean([2, 3])
@@ -107,7 +109,7 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
 
                 proj_negatives = F.normalize(model.projector(features_negatives), dim=1)
 
-                # Loss 계산
+                # ✅ Hard Negative 포함하여 Loss 계산
                 loss = model.compute_loss(proj_A, proj_B, proj_negatives)
 
             if torch.isnan(loss) or torch.isinf(loss):
@@ -124,36 +126,44 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
         avg_loss = running_loss / len(train_dataloader)
         train_losses.append(avg_loss)
 
-        # Validation
+        # Validation & Test
         val_srocc, val_plcc = validate(args, model, val_dataloader, device)
         val_srocc_values.append(val_srocc)
         val_plcc_values.append(val_plcc)
 
-        # Test
         test_metrics = test(args, model, test_dataloader, device)
         test_srocc_values.append(test_metrics['srcc'])
         test_plcc_values.append(test_metrics['plcc'])
 
+        # Learning Rate Scheduler
         lr_scheduler.step()
 
+        # ✅ Epoch별 결과 출력
+        print(f"\n🔹 **Epoch [{epoch + 1}/{args.training.epochs}] Results** 🔹")
+        print(f"📌 Loss: {avg_loss:.6f}")
+        print(f"📌 Validation SROCC: {val_srocc:.6f}, PLCC: {val_plcc:.6f}")
+        print(f"📌 Test SROCC: {test_metrics['srcc']:.6f}, PLCC: {test_metrics['plcc']:.6f}")
+
+        # ✅ Best Model 저장
         if val_srocc > best_srocc:
             best_srocc = val_srocc
             save_checkpoint(model, checkpoint_path, epoch, val_srocc)
 
-    print("Training completed.")
+    print("\n✅ **Training Completed** ✅")
 
-    # ✅ 수정된 부분: 결과 반환
+    # ✅ 모든 Epoch 결과 저장하여 반환
     return {
-        "loss": np.mean(train_losses),
-        "srocc": np.mean(val_srocc_values),
-        "plcc": np.mean(val_plcc_values)
+        "loss": train_losses,
+        "srocc": val_srocc_values,
+        "plcc": val_plcc_values
     }, {
-        "srocc": np.mean(val_srocc_values),
-        "plcc": np.mean(val_plcc_values)
+        "srocc": val_srocc_values,
+        "plcc": val_plcc_values
     }, {
-        "srocc": np.mean(test_srocc_values),
-        "plcc": np.mean(test_plcc_values)
+        "srocc": test_srocc_values,
+        "plcc": test_plcc_values
     }
+
 
 def test(args, model, test_dataloader, device):
     model.eval()
@@ -202,9 +212,6 @@ if __name__ == "__main__":
     optimizer = torch.optim.SGD(model.parameters(), lr=args.training.learning_rate, momentum=0.9, weight_decay=1e-4)
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-6)
 
-    train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, device)
-    # Results
-
     train_metrics, val_metrics, test_metrics = train(
         args,
         model,
@@ -216,10 +223,12 @@ if __name__ == "__main__":
         device
     )
 
-    print("\nTraining Metrics:", train_metrics)
-    print("Validation Metrics:", val_metrics)
-    print("Test Metrics:", test_metrics)
+    print("\n🔹 **Final Training Metrics:** 🔹")
+    for epoch, (loss, srocc, plcc) in enumerate(zip(train_metrics["loss"], train_metrics["srocc"], train_metrics["plcc"])):
+        print(f"📌 **Epoch {epoch+1}:** Loss: {loss:.6f}, SROCC: {srocc:.6f}, PLCC: {plcc:.6f}")
 
+    print("\n🔹 **Final Validation Metrics:** 🔹", val_metrics)
+    print("🔹 **Final Test Metrics:** 🔹", test_metrics)
 
 # KONIQ
 """ 

@@ -1,57 +1,96 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
+from torchvision import transforms
+import cv2
+import seaborn as sns
+import scipy.stats
 
-
+# 논문
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# 논문
+class CPFE(nn.Module):
+    """ Context-aware Pyramid Feature Extraction (CPFE) """
+    def __init__(self, in_channels, out_channels):
+        super(CPFE, self).__init__()
+
+        self.conv1x1 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
+        self.conv3x3 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.conv5x5 = nn.Conv2d(in_channels, out_channels, kernel_size=5, stride=1, padding=2)
+
+        self.batch_norm = nn.BatchNorm2d(out_channels * 3)  # Concat 후 batch norm
+        self.activation = nn.ReLU(inplace=True)
+
+        self.fuse_conv = nn.Conv2d(out_channels * 3, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        feat1 = self.conv1x1(x)
+        feat2 = self.conv3x3(x)
+        feat3 = self.conv5x5(x)
+
+        fused = torch.cat([feat1, feat2, feat3], dim=1)
+        fused = self.batch_norm(fused)
+        fused = self.activation(fused)
+
+        return self.fuse_conv(fused)
+
 class FeatureLevelAttention(nn.Module):
+    """ 논문에 맞게 CPFE + Channel Attention (CA) + Spatial Attention (SA) 적용 """
     def __init__(self, in_channels, out_channels):
         super(FeatureLevelAttention, self).__init__()
         self.out_channels = out_channels
 
-        # 입력 채널 변환
-        self.input_conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        # ✅ CPFE (Pyramid Feature Extraction)
+        self.cpfe = CPFE(in_channels, out_channels)
 
-        # Channel-wise Attention
+        # ✅ Channel-wise Attention (CA)
         self.channel_fc1 = nn.Linear(out_channels, out_channels // 4)
         self.channel_fc2 = nn.Linear(out_channels // 4, out_channels)
 
-        # Spatial Attention
+        # ✅ Spatial Attention (SA)
         self.spatial_conv1 = nn.Conv2d(out_channels, out_channels // 2, kernel_size=(1, 9), padding=(0, 4))
         self.spatial_bn1 = nn.BatchNorm2d(out_channels // 2)
         self.spatial_conv2 = nn.Conv2d(out_channels // 2, 1, kernel_size=(9, 1), padding=(4, 0))
         self.spatial_bn2 = nn.BatchNorm2d(1)
 
-        # Feature Update
+        # ✅ Feature Update
         self.feature_update_conv = nn.Conv2d(out_channels, out_channels, kernel_size=1)
         self.batch_norm = nn.BatchNorm2d(out_channels)
         self.activation = nn.ReLU()
 
     def forward(self, x):
-        b, c, h, w = x.size()
-        x = self.input_conv(x)
+        if len(x.shape) == 2:  # ✅ 2D일 경우 강제 변환
+            x = x.view(x.shape[0], x.shape[1], 1, 1)
 
-        # Channel-wise Attention
+        b, c, h, w = x.size()  # ✅ 이제 오류 없음!
+
+
+        # ✅ Channel-wise Attention (CA)
         channel_weights = F.adaptive_avg_pool2d(x, (1, 1)).view(b, c)
         channel_weights = F.relu(self.channel_fc1(channel_weights))
         channel_weights = torch.sigmoid(self.channel_fc2(channel_weights))
         channel_weights = channel_weights.view(b, c, 1, 1)
-        channel_attention = x * channel_weights
+        channel_attention = x * channel_weights  # 채널별 가중치 적용
 
-        # Spatial Attention
+        # ✅ Spatial Attention (SA)
         spatial_weights = F.relu(self.spatial_bn1(self.spatial_conv1(channel_attention)))
         spatial_weights = F.relu(self.spatial_bn2(self.spatial_conv2(spatial_weights)))
         spatial_weights = torch.sigmoid(spatial_weights)
-        spatial_attention = channel_attention * spatial_weights
+        spatial_attention = channel_attention * spatial_weights  # 공간별 가중치 적용
 
-        # Feature Update & Residual Connection
+        # ✅ Feature Update & Residual Connection
         out = self.feature_update_conv(spatial_attention)
         out = self.batch_norm(out)
         out = self.activation(out)
-        out = out + x  # Residual Connection
+        out = out + x  # Residual Connection 유지
 
         return out
+
     
 
 # Feature-Level Attention
