@@ -16,18 +16,17 @@ import torch.nn.functional as F
 from models.resnet_se import ResNetSE
 from models.attention_se import HardNegativeCrossAttention, FeatureLevelAttention
 
+import torch
+import torch.nn as nn
+from models.resnet_se import ResNetSE
+
 class SimCLR(nn.Module):
-    def __init__(self, embedding_dim=128, temperature=0.5, use_hnca=False):
+    def __init__(self, dataset_type="synthetic", embedding_dim=128, temperature=0.5):
         super(SimCLR, self).__init__()
         self.temperature = temperature
-        self.use_hnca = use_hnca  # ✅ Hard Negative 사용 여부
+        self.dataset_type = dataset_type
 
-        self.backbone = ResNetSE()
-        self.feature_attention = FeatureLevelAttention(in_channels=2048, out_channels=2048)
-
-        if self.use_hnca:
-            self.hard_negative_attention = HardNegativeCrossAttention(2048)
-
+        self.backbone = ResNetSE(dataset_type)
         self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
         self.projector = nn.Sequential(
@@ -36,16 +35,9 @@ class SimCLR(nn.Module):
             nn.Linear(2048, embedding_dim)
         )
 
-    def forward(self, inputs_A, inputs_B):
-        features_A = self.backbone(inputs_A)
-        features_B = self.backbone(inputs_B)
-
-        features_A = self.feature_attention(features_A)
-        features_B = self.feature_attention(features_B)
-
-        if self.use_hnca:
-            features_A = self.hard_negative_attention(features_A, features_B)
-            features_B = self.hard_negative_attention(features_B, features_A)
+    def forward(self, inputs_A, inputs_B, hard_neg=None):
+        features_A = self.backbone(inputs_A, hard_neg if self.dataset_type == "synthetic" else None)
+        features_B = self.backbone(inputs_B, hard_neg if self.dataset_type == "synthetic" else None)
 
         features_A = torch.flatten(self.global_avg_pool(features_A), start_dim=1)
         features_B = torch.flatten(self.global_avg_pool(features_B), start_dim=1)

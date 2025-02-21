@@ -91,7 +91,9 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
 
             optimizer.zero_grad()
 
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast(device_type="cuda"):
+
+
                 proj_A, proj_B = model(inputs_A, inputs_B)
 
                 proj_A, proj_B = F.normalize(proj_A, dim=1), F.normalize(proj_B, dim=1)

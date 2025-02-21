@@ -128,7 +128,11 @@ class KADID10KDataset(Dataset):
                 return Image.fromarray(noisy_image)
 
             elif distortion == "denoise":
-                image = image.filter(ImageFilter.MedianFilter(size=int(level)))
+                filter_size = max(3, min(int(level * 10) * 2 + 1, 15))  # 최소 3, 최대 15의 홀수 필터 크기 설정
+                if filter_size % 2 == 0:
+                    filter_size += 1  # 홀수로 변환
+                print(f"[Debug] Applying MedianFilter with size {filter_size}")  # 디버깅 로그 추가
+                image = image.filter(ImageFilter.MedianFilter(size=filter_size))
 
             elif distortion == "brighten":
                 enhancer = ImageEnhance.Brightness(image)
