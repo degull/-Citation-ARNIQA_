@@ -4,58 +4,43 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import random
-import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
+import numpy as np
+import io
+import matplotlib.pyplot as plt
 
 class CSIQDataset(Dataset):
-    def __init__(self, root: str, phase: str = "train", crop_size: int = 224, use_hard_negative=True):
+    def __init__(self, root: str, phase: str = "train", crop_size: int = 224, dataset_type="synthetic"):
+        """
+        dataset_type: 
+            "synthetic" (CSIQ) → Hard Negative 적용
+            "authentic" (KonIQ-10k, SPAQ, LIVE-FB) → Hard Negative 적용 안함
+        """
         super().__init__()
         self.root = str(root)
         self.phase = phase
         self.crop_size = crop_size
-        self.use_hard_negative = use_hard_negative  # ✅ Hard Negative 적용 여부
+        self.dataset_type = dataset_type  # ✅ 데이터셋 유형 결정
 
-        # ✅ CSIQ.txt 파일 확인 및 로드
-        scores_csv_path = os.path.join(self.root, "CSIQ.txt")
-        if not os.path.isfile(scores_csv_path):
-            raise FileNotFoundError(f"[Error] CSIQ 데이터셋 CSV 파일이 {scores_csv_path}에 존재하지 않습니다.")
+        # ✅ CSIQ 데이터셋 경로 설정
+        scores_txt_path = os.path.join(self.root, "CSIQ.txt")
+        if not os.path.isfile(scores_txt_path):
+            raise FileNotFoundError(f"CSIQ TXT 파일이 {scores_txt_path} 경로에 존재하지 않습니다.")
 
-        scores_csv = pd.read_csv(scores_csv_path)
+        # ✅ CSV 파일 로드 (구분자 `,` 사용)
+        scores_data = pd.read_csv(scores_txt_path, sep=',', names=["dist_img", "dist_type", "ref_img", "mos"], header=0)
+
+        # 🔹 NaN 값 제거 후 문자열로 변환
+        scores_data.dropna(inplace=True)
+        scores_data = scores_data.astype(str)
 
         # ✅ 이미지 경로 설정
-        self.image_paths = []
-        self.reference_paths = []
-        self.mos = []
+        self.image_paths = [os.path.join(self.root, img_path.replace("CSIQ/", "")) for img_path in scores_data["dist_img"]]
+        self.reference_paths = [os.path.join(self.root, img_path.replace("CSIQ/", "")) for img_path in scores_data["ref_img"]]
+        self.mos = scores_data["mos"].astype(float).values  # MOS 값을 float로 변환
 
-        for _, row in scores_csv.iterrows():
-            distortion_type = row["dis_type"].strip().lower()  # ✅ 왜곡 유형
-            distorted_filename = row["dis_img_path"].split("/")[-1]  # ✅ 파일명만 가져옴
-            reference_filename = row["ref_img_path"].split("/")[-1]  # ✅ 원본 파일명
-
-            # ✅ "contrast dist." → "contrast" 자동 변환
-            if "contrast dist." in distortion_type:
-                distortion_type = "contrast"
-
-            distorted_path = os.path.normpath(os.path.join(self.root, "dst_imgs", distortion_type, distorted_filename))
-            reference_path = os.path.normpath(os.path.join(self.root, "src_imgs", reference_filename))
-
-            # ✅ 존재하는 파일만 추가
-            if os.path.exists(distorted_path) and os.path.exists(reference_path):
-                self.image_paths.append(distorted_path)
-                self.reference_paths.append(reference_path)
-                self.mos.append(row["score"])
-            else:
-                print(f"[Warning] 파일 없음: {distorted_path} 또는 {reference_path}, 스킵됨.")
-
-        # ✅ Hard Negative 적용을 위한 왜곡 유형 리스트
-        self.distortion_types = ["motion_blur", "noise", "brightness", "contrast", "downsampling"]
-        self.distortion_levels = {
-            "motion_blur": [ImageFilter.GaussianBlur(radius) for radius in [1, 2, 3]],
-            "noise": [0.01, 0.05, 0.1],
-            "brightness": [0.5, 0.75, 1.25, 1.5],
-            "contrast": [0.5, 0.75, 1.25, 1.5],
-            "downsampling": [0.5, 0.75]
-        }
+        # ✅ CSIQ 데이터셋의 6개 왜곡 유형 (Hard Negative 적용 대상)
+        self.distortion_types = ["jpeg", "jpeg2000", "blur", "awgn", "contrast", "fnoise"]
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
@@ -63,34 +48,63 @@ class CSIQDataset(Dataset):
             transforms.ToTensor(),
         ])(image)
 
-    def apply_distortion(self, image: Image, distortion_type: str, level):
-        image_np = np.array(image)  # ✅ PIL 이미지를 NumPy 배열로 변환
-        if distortion_type == "motion_blur":
-            return image.filter(level)
-        elif distortion_type == "noise":
-            img_array = torch.tensor(image_np, dtype=torch.float32) / 255.0  # ✅ NumPy → Tensor 변환 시 dtype 지정
-            noise = torch.randn_like(img_array) * level
-            noisy_img = torch.clamp(img_array + noise, 0, 1) * 255
-            return Image.fromarray(noisy_img.byte().numpy())  # ✅ NumPy → PIL 변환
-        elif distortion_type == "brightness":
-            return ImageEnhance.Brightness(image).enhance(level)
-        elif distortion_type == "contrast":
-            return ImageEnhance.Contrast(image).enhance(level)
-        elif distortion_type == "downsampling":
-            small_img = image.resize((int(image.width * level), int(image.height * level)))
-            return small_img.resize((image.width, image.height))
+    def apply_distortion(self, image, distortion, level):
+        try:
+            image = image.convert("RGB")  # Ensure the image is in RGB format
+
+            if distortion == "jpeg":
+                quality = max(1, min(100, int(100 - (level * 100))))
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG", quality=quality)
+                buffer.seek(0)
+                return Image.open(buffer)
+
+            elif distortion == "jpeg2000":
+                image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
+
+            elif distortion == "blur":
+                image = image.filter(ImageFilter.GaussianBlur(radius=level))
+
+            elif distortion == "awgn":
+                image_array = np.array(image, dtype=np.float32)
+                noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
+                noisy_image = image_array + noise
+                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+                image = Image.fromarray(noisy_image)
+
+            elif distortion == "contrast":
+                enhancer = ImageEnhance.Contrast(image)
+                image = enhancer.enhance(1 + level)
+
+            elif distortion == "fnoise":
+                image_array = np.array(image).astype(np.float32)
+                noise = np.random.normal(1, level, image_array.shape)
+                noisy_image = image_array * noise
+                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+                image = Image.fromarray(noisy_image)
+
+            else:
+                print(f"[Warning] Distortion type '{distortion}' not implemented.")
+
+        except Exception as e:
+            print(f"[Error] Applying distortion {distortion} with level {level}: {e}")
+
         return image
 
     def __getitem__(self, index: int):
+        """
+        ✅ 데이터셋 유형에 따라 `img_B` 처리 방식 변경 ✅
+        - Synthetic 데이터셋(CSIQ) → Hard Negative 적용
+        - Authentic 데이터셋(KonIQ-10k, SPAQ, LIVE-FB) → Hard Negative 적용 안함
+        """
         img_A = Image.open(self.image_paths[index]).convert("RGB")  
-        img_B_orig = Image.open(self.reference_paths[index]).convert("RGB")  
+        img_B = Image.open(self.reference_paths[index]).convert("RGB")  
 
-        if self.use_hard_negative:
+        # ✅ Synthetic 데이터셋에만 Hard Negative 적용
+        if self.dataset_type == "synthetic":
             distortion_type = random.choice(self.distortion_types)
-            level = random.choice(self.distortion_levels[distortion_type])
-            img_B = self.apply_distortion(img_B_orig, distortion_type, level)
-        else:
-            img_B = img_B_orig
+            level = random.uniform(0.1, 0.5)
+            img_B = self.apply_distortion(img_B, distortion_type, level)
 
         img_A = self.transform(img_A)
         img_B = self.transform(img_B)
@@ -104,26 +118,32 @@ class CSIQDataset(Dataset):
     def __len__(self):
         return len(self.image_paths)
 
-# ✅ `if __name__ == "__main__":`에서 데이터셋 테스트 코드 추가
+
 if __name__ == "__main__":
+    """
+    ✅ Hard Negative 적용 여부를 확인하고, 이미지 비교를 수행
+    """
     dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
-    dataset = CSIQDataset(root=dataset_path, phase="train", crop_size=224, use_hard_negative=True)
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
 
-    print(f"Dataset size: {len(dataset)}")
+    synthetic_dataset = CSIQDataset(root=dataset_path, phase="train", crop_size=224, dataset_type="synthetic")
+    synthetic_dataloader = DataLoader(synthetic_dataset, batch_size=4, shuffle=True)
 
-    # ✅ 첫 번째 배치 데이터 확인
-    sample_batch = next(iter(dataloader))
-    
-    print(f"Sample batch shapes:")
-    print(f"  img_A: {sample_batch['img_A'].shape}")  # (batch_size, 3, 224, 224)
-    print(f"  img_B: {sample_batch['img_B'].shape}")  # (batch_size, 3, 224, 224)
-    print(f"  MOS: {sample_batch['mos']}")
+    print(f"Synthetic Dataset size: {len(synthetic_dataset)}")
 
-    # ✅ 첫 번째 샘플 확인
-    index = 0
-    sample = dataset[index]
-    print("\nFirst Sample in Dataset:")
-    print(f"  img_A shape: {sample['img_A'].shape}")
-    print(f"  img_B shape: {sample['img_B'].shape}")
-    print(f"  MOS Score: {sample['mos']}")
+    # ✅ Hard Negative 적용 확인
+    sample_batch_synthetic = next(iter(synthetic_dataloader))
+    print(f"\n[Synthetic] Hard Negative 적용 확인:")
+    for i in range(4):  
+        print(f"  Sample {i+1} - MOS: {sample_batch_synthetic['mos'][i]}")
+
+    # ✅ 원본 이미지 vs Hard Negative 비교
+    sample_index = 0
+    img_A_np = sample_batch_synthetic['img_A'][sample_index].permute(1, 2, 0).numpy()
+    img_B_np = sample_batch_synthetic['img_B'][sample_index].permute(1, 2, 0).numpy()
+
+    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+    ax[0].imshow(img_A_np)
+    ax[0].set_title("Distorted Image (img_A)")
+    ax[1].imshow(img_B_np)
+    ax[1].set_title("Hard Negative (img_B)")
+    plt.show()

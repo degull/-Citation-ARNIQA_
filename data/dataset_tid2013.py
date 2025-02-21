@@ -7,13 +7,13 @@ import random
 from PIL import Image, ImageEnhance, ImageFilter
 import numpy as np
 import io
-import matplotlib.pyplot as plt  # ✅ 추가: 시각적 비교를 위해 matplotlib 사용
+import matplotlib.pyplot as plt
 
-class KADID10KDataset(Dataset):
+class TID2013Dataset(Dataset):
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224, dataset_type="synthetic"):
         """
         dataset_type: 
-            "synthetic" (KADID10K, CSIQ) → Hard Negative 적용
+            "synthetic" (TID2013) → Hard Negative 적용
             "authentic" (KonIQ-10k, SPAQ, LIVE-FB) → Hard Negative 적용 안함
         """
         super().__init__()
@@ -22,25 +22,29 @@ class KADID10KDataset(Dataset):
         self.crop_size = crop_size
         self.dataset_type = dataset_type  # ✅ 데이터셋 유형 결정
 
-        # ✅ CSV 파일 로드
-        scores_csv_path = os.path.join(self.root, "kadid10k.csv")
+        # ✅ MOS CSV 파일 로드
+        scores_csv_path = os.path.join(self.root, "mos.csv")
         if not os.path.isfile(scores_csv_path):
-            raise FileNotFoundError(f"KADID10K CSV 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
+            raise FileNotFoundError(f"TID2013 MOS CSV 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
 
-        scores_csv = pd.read_csv(scores_csv_path)
+        scores_data = pd.read_csv(scores_csv_path)
 
         # ✅ 이미지 경로 설정
-        self.image_paths = [os.path.join(self.root, "images", img) for img in scores_csv["dist_img"]]
-        self.reference_paths = [os.path.join(self.root, "images", img) for img in scores_csv["ref_img"]]
-        self.mos = scores_csv["dmos"].values
+        self.image_paths = [os.path.join(self.root, "distorted_images", img) for img in scores_data["image_id"]]
+        self.reference_paths = [
+            os.path.join(self.root, "reference_images", img.split("_")[0] + ".BMP") for img in scores_data["image_id"]
+        ]
+        self.mos = scores_data["mean"].astype(float).values  # MOS 값을 float로 변환
 
-        # ✅ KADID-10K 데이터셋의 25개 왜곡 유형 (Hard Negative를 위한 리스트)
+        # ✅ TID2013 데이터셋의 24개 왜곡 유형 (Hard Negative 적용 대상)
         self.distortion_types = [
-            "gaussian_blur", "lens_blur", "motion_blur", "color_diffusion", "color_shift",
-            "color_quantization", "color_saturation_1", "color_saturation_2", "jpeg2000", "jpeg",
-            "white_noise", "white_noise_color_component", "impulse_noise", "multiplicative_noise",
-            "denoise", "brighten", "darken", "mean_shift", "jitter", "non_eccentricity_patch",
-            "pixelate", "quantization", "color_block", "high_sharpen", "contrast_change"
+            "additive_gaussian_noise", "additive_noise_in_color_components", "spatially_correlated_noise",
+            "masked_noise", "high_frequency_noise", "impulse_noise", "quantization_noise",
+            "gaussian_blur", "image_denoising", "jpeg_compression", "jpeg2000_compression",
+            "jpeg_transmission_errors", "jpeg2000_transmission_errors", "non_eccentricity_pattern_noise",
+            "local_block_wise_distortions", "mean_shift", "contrast_change", "change_of_color_saturation",
+            "multiplicative_gaussian_noise", "comfort_noise", "lossy_compression_of_noisy_images",
+            "image_color_quantization_with_dither", "chromatic_aberrations", "sparse_sampling_and_reconstruction"
         ]
 
     def transform(self, image: Image) -> torch.Tensor:
@@ -53,63 +57,32 @@ class KADID10KDataset(Dataset):
         try:
             image = image.convert("RGB")  # Ensure the image is in RGB format
 
-            if distortion == "gaussian_blur":
-                image = image.filter(ImageFilter.GaussianBlur(radius=level))
-
-            elif distortion == "lens_blur":
-                image = image.filter(ImageFilter.GaussianBlur(radius=level))
-
-            elif distortion == "motion_blur":
-                image = image.filter(ImageFilter.BoxBlur(level))
-
-            elif distortion == "color_diffusion":
-                diffused = np.array(image).astype(np.float32)
-                diffusion = np.random.uniform(-level * 255, level * 255, size=diffused.shape).astype(np.float32)
-                diffused += diffusion
-                diffused = np.clip(diffused, 0, 255).astype(np.uint8)
-                image = Image.fromarray(diffused)
-
-            elif distortion == "color_shift":
-                shifted = np.array(image).astype(np.float32)
-                shift_amount = np.random.uniform(-level * 255, level * 255, shifted.shape[-1])
-                shifted += shift_amount
-                image = Image.fromarray(np.clip(shifted, 0, 255).astype(np.uint8))
-
-            elif distortion == "color_quantization":
-                quantized = (np.array(image) // int(256 / level)) * int(256 / level)
-                image = Image.fromarray(np.clip(quantized, 0, 255).astype(np.uint8))
-
-            elif distortion == "color_saturation_1":
-                enhancer = ImageEnhance.Color(image)
-                image = enhancer.enhance(1 + level)
-
-            elif distortion == "color_saturation_2":
-                enhancer = ImageEnhance.Color(image)
-                image = enhancer.enhance(1 - level)
-
-            elif distortion == "jpeg2000":
-                image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
-
-            elif distortion == "jpeg":
-                quality = max(1, min(100, int(100 - (level * 100))))
-                buffer = io.BytesIO()
-                image.save(buffer, format="JPEG", quality=quality)
-                buffer.seek(0)
-                return Image.open(buffer)
-
-            elif distortion == "white_noise":
+            if distortion == "additive_gaussian_noise":
                 image_array = np.array(image, dtype=np.float32)
-                noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
-                noisy_image = image_array + noise
-                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+                noise = np.random.normal(0, level * 255, image_array.shape).astype(np.float32)
+                noisy_image = np.clip(image_array + noise, 0, 255).astype(np.uint8)
                 image = Image.fromarray(noisy_image)
 
-            elif distortion == "white_noise_color_component":
+            elif distortion == "additive_noise_in_color_components":
                 image_array = np.array(image, dtype=np.float32)
-                noise = np.random.normal(loc=0, scale=level * 255, size=image_array.shape).astype(np.float32)
-                noisy_image = image_array + noise
-                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+                noise = np.random.normal(0, level * 255, image_array.shape).astype(np.float32)
+                noisy_image = np.clip(image_array + noise, 0, 255).astype(np.uint8)
                 image = Image.fromarray(noisy_image)
+
+            elif distortion == "spatially_correlated_noise":
+                image_array = np.array(image, dtype=np.float32)
+                noise = np.random.normal(0, level * 255, image_array.shape)
+                noisy_image = np.clip(image_array + noise, 0, 255).astype(np.uint8)
+                image = Image.fromarray(noisy_image)
+
+            elif distortion == "masked_noise":
+                image_array = np.array(image, dtype=np.float32)
+                mask = np.random.choice([0, 1], size=image_array.shape, p=[1 - level, level])
+                image_array[mask == 1] = 0  # 마스크된 영역을 검은색으로 변경
+                image = Image.fromarray(image_array.astype(np.uint8))
+
+            elif distortion == "high_frequency_noise":
+                image = image.filter(ImageFilter.FIND_EDGES)
 
             elif distortion == "impulse_noise":
                 image_array = np.array(image).astype(np.float32)
@@ -117,67 +90,60 @@ class KADID10KDataset(Dataset):
                 mask = np.random.choice([0, 1], size=image_array.shape[:2], p=[1 - prob, prob])
                 random_noise = np.random.choice([0, 255], size=(image_array.shape[0], image_array.shape[1], 1))
                 image_array[mask == 1] = random_noise[mask == 1]
-                image_array = np.clip(image_array, 0, 255).astype(np.uint8)
-                return Image.fromarray(image_array)
+                image = Image.fromarray(image_array.astype(np.uint8))
 
-            elif distortion == "multiplicative_noise":
-                image_array = np.array(image).astype(np.float32)
-                noise = np.random.normal(1, level, image_array.shape)
-                noisy_image = image_array * noise
-                noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
-                return Image.fromarray(noisy_image)
+            elif distortion == "quantization_noise":
+                quantized = (np.array(image) // int(256 / level)) * int(256 / level)
+                image = Image.fromarray(quantized.astype(np.uint8))
 
-            elif distortion == "denoise":
+            elif distortion == "gaussian_blur":
+                image = image.filter(ImageFilter.GaussianBlur(radius=level))
+
+            elif distortion == "image_denoising":
                 image = image.filter(ImageFilter.MedianFilter(size=int(level)))
 
-            elif distortion == "brighten":
-                enhancer = ImageEnhance.Brightness(image)
-                image = enhancer.enhance(1 + level)
+            elif distortion == "jpeg_compression":
+                quality = max(1, min(100, int(100 - (level * 100))))
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG", quality=quality)
+                buffer.seek(0)
+                return Image.open(buffer)
 
-            elif distortion == "darken":
-                enhancer = ImageEnhance.Brightness(image)
-                image = enhancer.enhance(1 - level)
-
-            elif distortion == "mean_shift":
-                shifted_image = np.array(image).astype(np.float32) + level * 255
-                image = Image.fromarray(np.clip(shifted_image, 0, 255).astype(np.uint8))
-
-            elif distortion == "jitter":
-                jitter = np.random.randint(-level * 255, level * 255, (image.height, image.width, 3))
-                img_array = np.array(image).astype(np.float32) + jitter
-                image = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
-
-            elif distortion == "non_eccentricity_patch":
-                width, height = image.size
-                crop_level = int(level * min(width, height))
-                image = image.crop((crop_level, crop_level, width - crop_level, height - crop_level))
-                image = image.resize((width, height))
-
-            elif distortion == "pixelate":
-                width, height = image.size
-                level = max(1, int(level * 10))  # float → int 변환
-                image = image.resize((width // level, height // level)).resize((width, height), Image.NEAREST)
-
-            elif distortion == "quantization":
-                quantized = (np.array(image) // int(256 / level)) * int(256 / level)
-                image = Image.fromarray(np.clip(quantized, 0, 255).astype(np.uint8))
-
-            elif distortion == "color_block":
-                block_size = max(1, int(image.width * level))
-                img_array = np.array(image)
-                for i in range(0, img_array.shape[0], block_size):
-                    for j in range(0, img_array.shape[1], block_size):
-                        block_color = np.random.randint(0, 256, (1, 1, 3))
-                        img_array[i:i + block_size, j:j + block_size] = block_color
-                image = Image.fromarray(img_array)
-
-            elif distortion == "high_sharpen":
-                enhancer = ImageEnhance.Sharpness(image)
-                image = enhancer.enhance(level)
+            elif distortion == "jpeg2000_compression":
+                image = image.resize((image.width // 2, image.height // 2)).resize((image.width, image.height))
 
             elif distortion == "contrast_change":
                 enhancer = ImageEnhance.Contrast(image)
-                image = enhancer.enhance(level)
+                image = enhancer.enhance(1 + level)
+
+            elif distortion == "change_of_color_saturation":
+                enhancer = ImageEnhance.Color(image)
+                image = enhancer.enhance(1 + level)
+
+            elif distortion == "multiplicative_gaussian_noise":
+                image_array = np.array(image).astype(np.float32)
+                noise = np.random.normal(1, level, image_array.shape)
+                noisy_image = np.clip(image_array * noise, 0, 255).astype(np.uint8)
+                image = Image.fromarray(noisy_image)
+
+            elif distortion == "comfort_noise":
+                image = image.filter(ImageFilter.EMBOSS)
+
+            elif distortion == "lossy_compression_of_noisy_images":
+                image = image.filter(ImageFilter.SMOOTH)
+
+            elif distortion == "image_color_quantization_with_dither":
+                image = image.convert("P", dither=Image.FLOYDSTEINBERG)
+
+            elif distortion == "chromatic_aberrations":
+                shift = int(level * 10)
+                image_array = np.array(image)
+                image_array[:, :, 0] = np.roll(image_array[:, :, 0], shift, axis=0)  # R 채널 이동
+                image = Image.fromarray(image_array)
+
+            elif distortion == "sparse_sampling_and_reconstruction":
+                image = image.resize((image.width // int(10 * level), image.height // int(10 * level)))
+                image = image.resize((image.width, image.height), Image.NEAREST)
 
             else:
                 print(f"[Warning] Distortion type '{distortion}' not implemented.")
@@ -188,15 +154,9 @@ class KADID10KDataset(Dataset):
         return image
 
     def __getitem__(self, index: int):
-        """
-        ✅ 데이터셋 유형에 따라 `img_B` 처리 방식 변경 ✅
-        - Synthetic 데이터셋(KADID10K, CSIQ) → Hard Negative 적용
-        - Authentic 데이터셋(KonIQ-10k, SPAQ, LIVE-FB) → Hard Negative 적용 안함
-        """
         img_A = Image.open(self.image_paths[index]).convert("RGB")  
         img_B = Image.open(self.reference_paths[index]).convert("RGB")  
 
-        # ✅ Synthetic 데이터셋에만 Hard Negative 적용
         if self.dataset_type == "synthetic":
             distortion_type = random.choice(self.distortion_types)
             level = random.uniform(0.1, 0.5)
@@ -211,17 +171,18 @@ class KADID10KDataset(Dataset):
             "mos": torch.tensor(self.mos[index], dtype=torch.float32),
         }
 
+
     def __len__(self):
+        """ ✅ 데이터셋 크기 반환 (🚨 이전 코드에서 없어서 오류 발생함) """
         return len(self.image_paths)
-
-
+    
 if __name__ == "__main__":
     """
     ✅ Hard Negative 적용 여부를 확인하고, 이미지 비교를 수행
     """
-    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/KADID10K"
+    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013"
 
-    synthetic_dataset = KADID10KDataset(root=dataset_path, phase="train", crop_size=224, dataset_type="synthetic")
+    synthetic_dataset = TID2013Dataset(root=dataset_path, phase="train", crop_size=224, dataset_type="synthetic")
     synthetic_dataloader = DataLoader(synthetic_dataset, batch_size=4, shuffle=True)
 
     print(f"Synthetic Dataset size: {len(synthetic_dataset)}")
