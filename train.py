@@ -1,4 +1,3 @@
-# KADID
 
 import torch
 import torch.nn as nn
@@ -12,20 +11,12 @@ from sklearn.linear_model import Ridge
 from data import KADID10KDataset
 from models.simclr import SimCLR
 from utils.utils import parse_config
-from utils.utils_distortions import apply_random_distortions, generate_hard_negatives
-import matplotlib.pyplot as plt
-import random
-from typing import Tuple
-import argparse
+from utils.utils_distortions import generate_hard_negatives
 import yaml
-from sklearn.model_selection import GridSearchCV
-import torch
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
-from tqdm import tqdm
-from pathlib import Path
 import random
-import matplotlib.pyplot as plt
+from sklearn.model_selection import GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 
@@ -40,13 +31,10 @@ def save_checkpoint(model: nn.Module, checkpoint_path: Path, epoch: int, srocc: 
     torch.save(model.state_dict(), checkpoint_path / filename)
 
 def calculate_srcc_plcc(proj_A, proj_B):
-    proj_A = proj_A.detach().cpu().numpy()
-    proj_B = proj_B.detach().cpu().numpy()
-    assert proj_A.shape == proj_B.shape, "Shape mismatch between proj_A and proj_B"
+    proj_A, proj_B = proj_A.detach().cpu().numpy(), proj_B.detach().cpu().numpy()
     srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
     plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
     return srocc, plcc
-
 
 def validate(args, model, dataloader, device):
     model.eval()
@@ -63,9 +51,7 @@ def validate(args, model, dataloader, device):
 
             proj_A, proj_B = model(inputs_A, inputs_B)
 
-            proj_A = F.normalize(proj_A, dim=1).cpu().numpy()
-            proj_B = F.normalize(proj_B, dim=1).cpu().numpy()
-
+            proj_A, proj_B = F.normalize(proj_A, dim=1).cpu().numpy(), F.normalize(proj_B, dim=1).cpu().numpy()
             srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
             plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
 
@@ -74,15 +60,14 @@ def validate(args, model, dataloader, device):
 
     return np.mean(srocc_values), np.mean(plcc_values)
 
-
 def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, device):
     checkpoint_path = Path(str(args.checkpoint_base_path))
     checkpoint_path.mkdir(parents=True, exist_ok=True)
     best_srocc = -1
 
-    train_metrics = {'loss': []}
-    val_metrics = {'srcc': [], 'plcc': []}
-    test_metrics = {'srcc': [], 'plcc': []}
+    train_losses = []
+    val_srocc_values, val_plcc_values = [], []
+    test_srocc_values, test_plcc_values = [], []
 
     for epoch in range(args.training.epochs):
         model.train()
@@ -99,9 +84,6 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
 
             hard_negatives = generate_hard_negatives(inputs_B, scale_factor=0.5)
 
-            # Debug: Log hard_negatives shape
-            print(f"[Debug] hard_negatives shape before processing: {hard_negatives.shape}")
-
             if hard_negatives.dim() == 5:
                 hard_negatives = hard_negatives.view(-1, *hard_negatives.shape[2:]).to(device)
             elif hard_negatives.dim() != 4:
@@ -112,14 +94,10 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
             with torch.cuda.amp.autocast():
                 proj_A, proj_B = model(inputs_A, inputs_B)
 
-                # Normalize projections
-                proj_A = F.normalize(proj_A, dim=1)
-                proj_B = F.normalize(proj_B, dim=1)
+                proj_A, proj_B = F.normalize(proj_A, dim=1), F.normalize(proj_B, dim=1)
 
-                # Backbone processing for hard negatives
+                # Hard Negative Feature Backbone 통과
                 features_negatives = model.backbone(hard_negatives)
-                print(f"[Debug] features_negatives shape after backbone: {features_negatives.shape}")
-
                 if features_negatives.dim() == 4:
                     features_negatives = features_negatives.mean([2, 3])
                 elif features_negatives.dim() != 2:
@@ -127,7 +105,7 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
 
                 proj_negatives = F.normalize(model.projector(features_negatives), dim=1)
 
-                # Compute loss
+                # Loss 계산
                 loss = model.compute_loss(proj_A, proj_B, proj_negatives)
 
             if torch.isnan(loss) or torch.isinf(loss):
@@ -142,17 +120,17 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
             progress_bar.set_postfix(loss=running_loss / (len(progress_bar) + 1))
 
         avg_loss = running_loss / len(train_dataloader)
-        train_metrics['loss'].append(avg_loss)
+        train_losses.append(avg_loss)
 
         # Validation
         val_srocc, val_plcc = validate(args, model, val_dataloader, device)
-        val_metrics['srcc'].append(val_srocc)
-        val_metrics['plcc'].append(val_plcc)
+        val_srocc_values.append(val_srocc)
+        val_plcc_values.append(val_plcc)
 
         # Test
-        test_metric = test(args, model, test_dataloader, device)
-        test_metrics['srcc'].append(test_metric['srcc'])
-        test_metrics['plcc'].append(test_metric['plcc'])
+        test_metrics = test(args, model, test_dataloader, device)
+        test_srocc_values.append(test_metrics['srcc'])
+        test_plcc_values.append(test_metrics['plcc'])
 
         lr_scheduler.step()
 
@@ -161,8 +139,19 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
             save_checkpoint(model, checkpoint_path, epoch, val_srocc)
 
     print("Training completed.")
-    return train_metrics, val_metrics, test_metrics
 
+    # ✅ 수정된 부분: 결과 반환
+    return {
+        "loss": np.mean(train_losses),
+        "srocc": np.mean(val_srocc_values),
+        "plcc": np.mean(val_plcc_values)
+    }, {
+        "srocc": np.mean(val_srocc_values),
+        "plcc": np.mean(val_plcc_values)
+    }, {
+        "srocc": np.mean(test_srocc_values),
+        "plcc": np.mean(test_plcc_values)
+    }
 
 def test(args, model, test_dataloader, device):
     model.eval()
@@ -173,7 +162,6 @@ def test(args, model, test_dataloader, device):
             inputs_A = batch["img_A"].to(device)
             inputs_B = batch["img_B"].to(device)
 
-            # Flatten crops if needed (5D -> 4D)
             if inputs_A.dim() == 5:
                 inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
             if inputs_B.dim() == 5:
@@ -181,136 +169,14 @@ def test(args, model, test_dataloader, device):
 
             proj_A, proj_B = model(inputs_A, inputs_B)
 
-            # Normalize projections
-            proj_A = F.normalize(proj_A, dim=1).cpu().numpy()
-            proj_B = F.normalize(proj_B, dim=1).cpu().numpy()
-
-            # Calculate SRCC and PLCC
+            proj_A, proj_B = F.normalize(proj_A, dim=1).cpu().numpy(), F.normalize(proj_B, dim=1).cpu().numpy()
             srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
             plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
 
             srocc_values.append(srocc)
             plcc_values.append(plcc)
 
-    avg_srocc_test = np.mean(srocc_values)
-    avg_plcc_test = np.mean(plcc_values)
-    return {'srcc': avg_srocc_test, 'plcc': avg_plcc_test}
-
-
-# regressor
-def debug_ridge_regressor(embeddings, mos_scores):
-    plt.figure(figsize=(8, 6))
-    plt.scatter(embeddings[:, 0], mos_scores, alpha=0.7)
-    plt.xlabel('Embedding Feature 0')
-    plt.ylabel('MOS Scores')
-    plt.title('Embedding vs MOS Scores')
-    plt.grid()
-    plt.show()
-
-def optimize_ridge_alpha(embeddings, mos_scores):
-    param_grid = {'alpha': [0.01, 0.1, 1.0, 10.0, 100.0]}
-    ridge = Ridge()
-    grid = GridSearchCV(ridge, param_grid, scoring='r2', cv=5)
-    grid.fit(embeddings, mos_scores)
-    best_alpha = grid.best_params_['alpha']
-    print(f"Optimal alpha: {best_alpha}")
-    return Ridge(alpha=best_alpha).fit(embeddings, mos_scores)
-
-def train_ridge_regressor(model: nn.Module, train_dataloader: DataLoader, device: torch.device):
-    model.eval()
-    embeddings, mos_scores = [], []
-
-    with torch.no_grad():
-        for batch in train_dataloader:
-            inputs_A = batch["img_A"].to(device)
-            mos = batch["mos"]
-
-            # 입력이 5D 텐서일 경우 4D로 변환
-            if inputs_A.dim() == 5:
-                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # [batch_size * num_crops, channels, height, width]
-
-            features_A = model.backbone(inputs_A)
-            features_A = features_A.mean([2, 3]).cpu().numpy()  # GAP 적용
-
-            # `mos` 값 반복 (inputs_A 크기에 맞춰 조정)
-            repeat_factor = features_A.shape[0] // mos.shape[0]  # inputs_A와 mos의 크기 비율 계산
-            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)[:features_A.shape[0]]
-
-            embeddings.append(features_A)
-            mos_scores.append(mos_repeated)
-
-    # 리스트를 numpy 배열로 변환
-    embeddings = np.vstack(embeddings)
-    mos_scores = np.hstack(mos_scores)
-
-    # 크기 검증
-    assert embeddings.shape[0] == mos_scores.shape[0], \
-        f"Mismatch in embeddings ({embeddings.shape[0]}) and MOS scores ({mos_scores.shape[0]})"
-
-    from sklearn.linear_model import Ridge
-    ridge = Ridge(alpha=1.0)
-    ridge.fit(embeddings, mos_scores)
-    print("Ridge Regressor Trained: Optimal alpha=1.0")
-    return ridge
-
-
-
-
-def evaluate_ridge_regressor(regressor, model: nn.Module, dataloader: DataLoader, device: torch.device):
-    model.eval()
-    mos_scores, predictions = [], []
-
-    with torch.no_grad():
-        for batch in dataloader:
-            inputs_A = batch["img_A"].to(device)
-            mos = batch["mos"]
-
-            if inputs_A.dim() == 5:
-                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])  # Flatten crops if needed
-
-            # Use backbone features for Ridge prediction
-            features_A = model.backbone(inputs_A)
-            features_A = features_A.mean([2, 3]).cpu().numpy()  # GAP 적용
-
-            prediction = regressor.predict(features_A)  # Use backbone features
-            repeat_factor = features_A.shape[0] // mos.shape[0]
-            mos_repeated = np.repeat(mos.cpu().numpy(), repeat_factor)[:features_A.shape[0]]
-
-            predictions.extend(prediction)
-            mos_scores.extend(mos_repeated)
-
-    mos_scores = np.array(mos_scores)
-    predictions = np.array(predictions)
-    assert mos_scores.shape == predictions.shape, \
-        f"Mismatch between MOS ({mos_scores.shape}) and Predictions ({predictions.shape})"
-
-    return mos_scores, predictions
-
-
-
-
-def plot_results(mos_scores, predictions):
-    assert mos_scores.shape == predictions.shape, "mos_scores and predictions must have the same shape"
-    plt.figure(figsize=(8, 6))
-    plt.scatter(mos_scores, predictions, alpha=0.7, label='Predictions vs MOS')
-    plt.plot([min(mos_scores), max(mos_scores)], [min(mos_scores), max(mos_scores)], 'r--', label='Ideal')
-    plt.xlabel('Ground Truth MOS')
-    plt.ylabel('Predicted MOS')
-    plt.title('Ridge Regressor Performance')
-    plt.legend()
-    plt.grid()
-    plt.show()
-
-def debug_embeddings(embeddings, title="Embeddings"):
-    plt.figure(figsize=(8, 6))
-    plt.hist(embeddings.flatten(), bins=50, alpha=0.7)
-    plt.title(f"{title} Distribution")
-    plt.xlabel("Embedding Value")
-    plt.ylabel("Frequency")
-    plt.grid()
-    plt.show()
-
-
+    return {'srcc': np.mean(srocc_values), 'plcc': np.mean(plcc_values)}
 
 if __name__ == "__main__":
     config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
@@ -324,37 +190,19 @@ if __name__ == "__main__":
     val_size = int(0.1 * len(dataset))
     test_size = len(dataset) - train_size - val_size
 
-    train_size = int(0.7 * len(dataset))
-    val_size = int(0.1 * len(dataset))
-    test_size = len(dataset) - train_size - val_size
-
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
 
-    train_dataloader = DataLoader(
-        train_dataset, batch_size=args.training.batch_size, shuffle=True, num_workers=4
-    )
-    val_dataloader = DataLoader(
-        val_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4
-    )
-    test_dataloader = DataLoader(
-        test_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4
-    )
+    train_dataloader = DataLoader(train_dataset, batch_size=args.training.batch_size, shuffle=True, num_workers=4)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
 
     model = SimCLR(embedding_dim=128, temperature=args.model.temperature).to(device)
-    optimizer = torch.optim.SGD(
-        model.parameters(),
-        lr=args.training.learning_rate,
-        momentum=args.training.optimizer.momentum,
-        weight_decay=args.training.optimizer.weight_decay
-    )
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer,
-        T_0=args.training.lr_scheduler.T_0,
-        T_mult=args.training.lr_scheduler.T_mult,
-        eta_min=args.training.lr_scheduler.eta_min
-    )
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.training.learning_rate, momentum=0.9, weight_decay=1e-4)
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-6)
 
-    # Train
+    train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, device)
+    # Results
+
     train_metrics, val_metrics, test_metrics = train(
         args,
         model,
@@ -366,11 +214,9 @@ if __name__ == "__main__":
         device
     )
 
-    # Results
     print("\nTraining Metrics:", train_metrics)
     print("Validation Metrics:", val_metrics)
     print("Test Metrics:", test_metrics)
-
 
 
 # KONIQ

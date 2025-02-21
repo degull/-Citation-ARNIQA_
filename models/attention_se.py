@@ -1,87 +1,50 @@
-import sys
-import os
-
-# 프로젝트 경로 추가
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from PIL import Image
-import matplotlib.pyplot as plt
-from torchvision import transforms
-import cv2
-import seaborn as sns
-import scipy.stats
 
-
-class GradCAM:
-    def __init__(self, model, target_layer):
-        self.model = model
-        self.target_layer = target_layer
-        self.gradients = None
-        
-    def save_gradient(self, grad):
-        self.gradients = grad
-        
-    def __call__(self, x):
-        x.requires_grad = True
-        feature_map, attention = self.model(x)
-        feature_map.register_hook(self.save_gradient)
-        
-        # 가장 높은 Attention Score를 가진 위치를 Gradient로 계산
-        score = torch.max(attention)
-        score.backward()
-        
-        grad = self.gradients.mean(dim=[2, 3], keepdim=True)
-        cam = F.relu(grad * feature_map).mean(dim=1).cpu().detach().numpy()
-        
-        return cam
-
-
-class FeatureLevelAttention(nn.Module):
-    def __init__(self, in_channels=3, out_channels=32, num_heads=8, dropout=0.3):
+# Feature-Level Attention
+""" class FeatureLevelAttention(nn.Module):
+    def __init__(self, in_channels, out_channels, num_heads=8, dropout=0.3):
         super(FeatureLevelAttention, self).__init__()
 
         self.num_heads = num_heads
         self.out_channels = out_channels
 
-        # ✅ 입력 채널 변환 (3 → 32, 해상도 유지)
+        # ✅ 입력 채널 변환 (해상도 유지)
         self.input_conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
         assert out_channels % num_heads == 0, "out_channels must be divisible by num_heads"
         self.head_dim = max(out_channels // num_heads, 1)
         self.scale = self.head_dim ** -0.5  
 
-        # Query, Key, Value 생성 (해상도 유지)
+        # Query, Key, Value 생성
         self.qkv_conv = nn.Conv2d(out_channels, out_channels * 3, kernel_size=3, stride=1, padding=1, bias=False)
         self.output_proj = nn.Conv2d(out_channels, out_channels, kernel_size=1)
 
-        # Feature Update (Residual Learning + Normalization)
+        # Feature Update
         self.feature_update_conv = nn.Conv2d(out_channels, out_channels, kernel_size=1)
         self.batch_norm = nn.BatchNorm2d(out_channels)
         self.activation = nn.SiLU()
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        b, c, h, w = x.size()
+        b, c, h, w = x.size()  # ✅ 원본 입력 크기 가져오기
 
-        # ✅ 입력 채널 변환 (해상도 유지)
+        # ✅ 입력 채널 변환
         x = self.input_conv(x)
 
-        # ✅ Query, Key, Value 생성 (해상도 유지)
+        # ✅ Query, Key, Value 생성
         qkv = self.qkv_conv(x).reshape(b, self.num_heads, 3, self.head_dim, h, w)
         q, k, v = torch.chunk(qkv, 3, dim=2)
         q, k, v = q.squeeze(2), k.squeeze(2), v.squeeze(2)  
 
-        # ✅ Gumbel Softmax 적용 (Feature Contrast 강화)
-        attention = F.gumbel_softmax(torch.matmul(q, k.transpose(-2, -1)) * self.scale, tau=1, hard=True, dim=-1)
+        # ✅ Gumbel Softmax 적용
+        attention = F.gumbel_softmax(torch.matmul(q, k.transpose(-2, -1)) * self.scale, tau=0.8, hard=True, dim=-1)
         A_final = torch.matmul(attention, v)  
-        A_final = A_final.reshape(b, self.out_channels, h, w)  
+        A_final = A_final.reshape(b, self.out_channels, h, w)  # ✅ 원본 크기 유지
 
-        # ✅ Attention Map 해상도 보존을 위해 Interpolation 적용
-        A_final = F.interpolate(A_final, size=(224, 224), mode="bilinear", align_corners=False)
+        # ✅ **출력 크기를 원본 크기 (`h, w`)로 유지**
+        A_final = F.interpolate(A_final, size=(h, w), mode="bilinear", align_corners=False)
 
         # 최종 Projection 적용
         A_final = self.output_proj(A_final)
@@ -93,67 +56,158 @@ class FeatureLevelAttention(nn.Module):
         # Residual Connection 적용
         out = A_final + x  
 
-        return out, attention
+        return out """
 
 
-def visualize_attention(img_path, model):
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor()
-    ])
+# PFAN 논문 Feature-Level Attention
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-    image = Image.open(img_path).convert("RGB")
-    img_tensor = transform(image).unsqueeze(0)  # (1, 3, 224, 224)
+class FeatureLevelAttention(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(FeatureLevelAttention, self).__init__()
 
-    with torch.no_grad():
-        _, attention_map = model(img_tensor)
+        self.out_channels = out_channels
 
-    print(f"Original Attention Map Shape: {attention_map.shape}")  # 확인용 출력
+        # ✅ 입력 채널 변환 (해상도 유지)
+        self.input_conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
-    # ✅ Attention Map 차원 조정 (num_heads 차원 제거)
-    attention_map = attention_map.mean(dim=1, keepdim=True)  # (1, 8, 4, 224, 224) → (1, 1, 4, 224, 224)
+        # ✅ Channel-wise Attention (CA)
+        self.channel_fc1 = nn.Linear(out_channels, out_channels // 4)
+        self.channel_fc2 = nn.Linear(out_channels // 4, out_channels)
 
-    # ✅ Spatial Dimension 조정: (1, 1, 4, 224, 224) → (1, 1, 224, 224)
-    attention_map = attention_map.mean(dim=2, keepdim=True)  # (1, 1, 4, 224, 224) → (1, 1, 1, 224, 224)
-    attention_map = attention_map.squeeze(2)  # (1, 1, 1, 224, 224) → (1, 1, 224, 224)
+        # ✅ Spatial Attention (SA)
+        self.spatial_conv1 = nn.Conv2d(out_channels, out_channels // 2, kernel_size=(1, 9), padding=(0, 4))
+        self.spatial_bn1 = nn.BatchNorm2d(out_channels // 2)
+        self.spatial_conv2 = nn.Conv2d(out_channels // 2, 1, kernel_size=(9, 1), padding=(4, 0))
+        self.spatial_bn2 = nn.BatchNorm2d(1)
 
-    # ✅ Normalize Attention Map
-    attention_map = (attention_map - attention_map.min()) / (attention_map.max() - attention_map.min())
-    attention_map = attention_map.squeeze().cpu().numpy()  # (224, 224)로 변환
+        # Feature Update
+        self.feature_update_conv = nn.Conv2d(out_channels, out_channels, kernel_size=1)
+        self.batch_norm = nn.BatchNorm2d(out_channels)
+        self.activation = nn.ReLU()
 
-    # ✅ 원본 이미지 로드
-    img_cv = cv2.imread(img_path)
-    if len(img_cv.shape) == 2 or img_cv.shape[-1] == 1:
-        img_cv = cv2.cvtColor(img_cv, cv2.COLOR_GRAY2BGR)
+    def forward(self, x):
+        b, c, h, w = x.size()
 
-    img_cv = cv2.resize(img_cv, (224, 224))
-    heatmap = cv2.applyColorMap(np.uint8(255 * attention_map), cv2.COLORMAP_JET)
+        # ✅ 입력 채널 변환
+        x = self.input_conv(x)
 
-    overlay = cv2.addWeighted(img_cv, 0.6, heatmap, 0.4, 0)
+        # ✅ Channel-wise Attention
+        channel_weights = F.adaptive_avg_pool2d(x, (1, 1)).view(b, c)
+        channel_weights = F.relu(self.channel_fc1(channel_weights))
+        channel_weights = torch.sigmoid(self.channel_fc2(channel_weights))
+        channel_weights = channel_weights.view(b, c, 1, 1)
+        channel_attention = x * channel_weights  # 채널별 가중치 적용
 
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 3, 1)
-    plt.imshow(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
-    plt.title("Original Image")
+        # ✅ Spatial Attention
+        spatial_weights = F.relu(self.spatial_bn1(self.spatial_conv1(channel_attention)))
+        spatial_weights = F.relu(self.spatial_bn2(self.spatial_conv2(spatial_weights)))
+        spatial_weights = torch.sigmoid(spatial_weights)
+        spatial_attention = channel_attention * spatial_weights  # 공간별 가중치 적용
 
-    plt.subplot(1, 3, 2)
-    plt.imshow(attention_map, cmap="jet")
-    plt.title("Attention Map")
+        # ✅ Feature Update & Residual Connection
+        out = self.feature_update_conv(spatial_attention)
+        out = self.batch_norm(out)
+        out = self.activation(out)
+        out = out + x  # Residual Connection
 
-    plt.subplot(1, 3, 3)
-    plt.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
-    plt.title("Overlayed Image")
-
-    plt.show()
+        return out
 
 
-# 실행
+
+class HardNegativeCrossAttention(nn.Module):
+    def __init__(self, in_dim, num_heads=8, reduction=16, alpha=0.5):
+        super(HardNegativeCrossAttention, self).__init__()
+        self.in_dim = in_dim
+        self.num_heads = num_heads  
+        self.alpha = alpha  
+
+        # 속성 정보 학습
+        self.attr_conv1 = nn.Conv2d(in_dim, in_dim // reduction, kernel_size=1)
+        self.attr_relu1 = nn.ReLU(inplace=True)
+        self.attr_conv2 = nn.Conv2d(in_dim // reduction, in_dim, kernel_size=1)
+        self.attr_relu2 = nn.ReLU(inplace=True)
+
+        # 텍스처 정보 학습
+        self.texture_conv1 = nn.Conv2d(in_dim, in_dim, kernel_size=3, padding=1)
+        self.texture_relu = nn.ReLU(inplace=True)
+        self.texture_conv2 = nn.ConvTranspose2d(in_dim, in_dim, kernel_size=3, padding=1)
+
+        # 속성 정보 Concat 후 1x1 Conv 적용
+        self.attr_dim_adjust = nn.Conv2d(in_dim * 2, in_dim, kernel_size=1)
+
+        # ✅ Multi-head Cross Attention에 필요한 Q, K, V 생성
+        self.head_dim = in_dim // num_heads
+        self.query_attr = nn.Linear(in_dim, in_dim)  
+        self.key_attr = nn.Linear(in_dim, in_dim)  
+        self.value_attr = nn.Linear(in_dim, in_dim)  
+
+        self.query_tex = nn.Linear(in_dim, in_dim)  
+        self.key_tex = nn.Linear(in_dim, in_dim)  
+        self.value_tex = nn.Linear(in_dim, in_dim)  
+
+        # ✅ 최종 Projection Layer
+        self.output_proj = nn.Conv2d(in_dim, in_dim, kernel_size=1)
+
+        # ✅ LayerNorm 대신 BatchNorm2d 사용 (권장)
+        self.norm = nn.BatchNorm2d(in_dim)  # ✅ LayerNorm → BatchNorm2d로 변경
+
+    def forward(self, x, hard_neg):
+        b, c, h, w = x.shape  
+
+        # 속성 정보 학습
+        attr_feat = self.attr_relu1(self.attr_conv1(x))
+        attr_feat = self.attr_relu2(self.attr_conv2(attr_feat))
+        attr_feat = torch.cat([attr_feat, x], dim=1)  
+        attr_feat = self.attr_dim_adjust(attr_feat)  
+
+        # 텍스처 정보 학습
+        texture_feat = self.texture_relu(self.texture_conv1(hard_neg))
+        texture_feat = self.texture_conv2(texture_feat)
+        texture_feat = texture_feat * attr_feat  
+
+        # Query, Key, Value 생성 (속성 & 텍스처 각각 따로 생성)
+        attr_feat = attr_feat.view(b, c, -1).permute(0, 2, 1)
+        texture_feat = texture_feat.view(b, c, -1).permute(0, 2, 1)
+
+        Q_attr = self.query_attr(attr_feat)  
+        K_attr = self.key_attr(attr_feat)  
+        V_attr = self.value_attr(attr_feat)  
+
+        Q_tex = self.query_tex(texture_feat)  
+        K_tex = self.key_tex(texture_feat)  
+        V_tex = self.value_tex(texture_feat)  
+
+        # Multi-Head Cross Attention 적용
+        attention_scores_attr = torch.softmax(Q_attr @ K_attr.transpose(-2, -1) / (self.in_dim ** 0.5), dim=-1)
+        attn_output_attr = attention_scores_attr @ V_attr  
+
+        attention_scores_tex = torch.softmax(Q_tex @ K_tex.transpose(-2, -1) / (self.in_dim ** 0.5), dim=-1)
+        attn_output_tex = attention_scores_tex @ V_tex  
+
+        # 속성과 텍스처 정보를 적절히 결합
+        attn_output = self.alpha * attn_output_attr + (1 - self.alpha) * attn_output_tex
+
+        # 원래 크기로 복구
+        attn_output = attn_output.permute(0, 2, 1).view(b, c, h, w)
+        attn_output = self.output_proj(attn_output)
+
+        # ✅ LayerNorm 대신 BatchNorm2d 적용
+        attn_output = self.norm(attn_output + x)  
+
+        return attn_output
+
+
+
+
+# ✅ 테스트 코드
 if __name__ == "__main__":
-    num_heads = 8
-    feature_attention = FeatureLevelAttention(in_channels=3, out_channels=32, num_heads=num_heads)
+    x = torch.randn(32, 2048, 7, 7)  # 속성 정보 (Attribute Feature)
+    hard_neg = torch.randn(32, 2048, 7, 7)  # 하드 네거티브 (Texture Feature)
 
-    # 여러 이미지를 테스트하여 시각적 변화를 분석
-    distortions = ["AWGN", "Blur", "JPEG"]
-    for distortion in distortions:
-        test_img_path = f"E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ/dst_imgs/{distortion}/family.{distortion}.5.png"
-        visualize_attention(test_img_path, feature_attention)
+    hnca = HardNegativeCrossAttention(in_dim=2048, num_heads=8, reduction=16, alpha=0.5)
+    output = hnca(x, hard_neg)
+
+    print("HNCA Output Shape:", output.shape)  # (32, 2048, 7, 7)
