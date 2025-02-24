@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 from pathlib import Path
 from scipy import stats
-from data.dataset_live import LIVEDataset
+from data.dataset_spaq import SPAQDataset
 from models.attention_se import DistortionDetectionModel
 from utils.utils import load_config
 
@@ -134,7 +134,7 @@ if __name__ == "__main__":
 
     # ✅ 데이터셋 로드
     dataset_path = Path(args.data_base_path)
-    dataset = LIVEDataset(str(dataset_path), crop_size=224)
+    dataset = SPAQDataset(str(dataset_path), crop_size=224)
 
 
     train_size = int(0.7 * len(dataset))

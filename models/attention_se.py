@@ -1,5 +1,3 @@
-# 기존 논문 방법
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,13 +5,19 @@ import torchvision.models as models
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from torchvision.transforms import ToPILImage
-from torchvision.transforms.functional import to_pil_image
+import pandas as pd
+from torchvision import transforms
 
+# ✅ MOS 값을 CSV에서 가져오는 함수
+def get_mos_value(image_name, csv_path):
+    df = pd.read_csv(csv_path)
+    mos_value = df[df["image_name"] == image_name]["MOS"].values
+    if len(mos_value) > 0:
+        return mos_value[0] / 100.0  # MOS 값을 0~1로 정규화
+    else:
+        return None
 
-
-
-# ✅ VGG-16을 활용한 특징 추출
+# ✅ VGG-16 특징 추출기
 class VGG16FeatureExtractor(nn.Module):
     def __init__(self):
         super(VGG16FeatureExtractor, self).__init__()
@@ -34,8 +38,7 @@ class VGG16FeatureExtractor(nn.Module):
         feat5 = self.conv5_3(feat4)  # (B, 512, 16, 16)
 
         return feat1, feat2, feat3, feat4, feat5
-
-
+    
 # ✅ Context-aware Pyramid Feature Extraction (CPFE 1)
 class CPFE(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -55,28 +58,6 @@ class CPFE(nn.Module):
         fused = torch.cat([feat1, feat2, feat3], dim=1)
         return self.fuse_conv(fused)
 
-# ✅ Context-aware Pyramid Feature Extraction (CPFE 2)
-""" class CPFE(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(CPFE, self).__init__()
-
-        self.conv1x1 = nn.Conv2d(in_channels, out_channels, kernel_size=1)
-        self.conv3x3_r3 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=3, dilation=3)
-        self.conv3x3_r5 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=5, dilation=5)
-        self.conv3x3_r7 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=7, dilation=7)
-
-        self.fuse_conv = nn.Conv2d(out_channels * 4, out_channels, kernel_size=1)
-
-    def forward(self, x):
-        feat1 = self.conv1x1(x)
-        feat2 = self.conv3x3_r3(x)
-        feat3 = self.conv3x3_r5(x)
-        feat4 = self.conv3x3_r7(x)
-
-        fused = torch.cat([feat1, feat2, feat3, feat4], dim=1)
-        return self.fuse_conv(fused) """
-
-
 
 # ✅ Spatial Attention (SA) for Distortion Detection (1)
 class SpatialAttention(nn.Module):
@@ -88,24 +69,9 @@ class SpatialAttention(nn.Module):
         attn = torch.sigmoid(self.conv(x))
         return x * attn
     
-# ✅ Spatial Attention (SA) for Distortion Detection (2)
-""" class SpatialAttention(nn.Module):
-    def __init__(self, in_channels):
-        super(SpatialAttention, self).__init__()
-
-        self.conv1xk = nn.Conv2d(in_channels, in_channels // 2, kernel_size=(1, 7), padding=(0, 3))
-        self.convkx1 = nn.Conv2d(in_channels, in_channels // 2, kernel_size=(7, 1), padding=(3, 0))
-        self.convk1 = nn.Conv2d(in_channels // 2, 1, kernel_size=1)
-
-    def forward(self, x):
-        attn_h = self.conv1xk(x)
-        attn_w = self.convkx1(x)
-        attn = torch.sigmoid(self.convk1(attn_h + attn_w))
-        return x * attn """
 
 
 
-# ✅ Channel-wise Attention (CA) for Distortion Detection
 class ChannelwiseAttention(nn.Module):
     def __init__(self, in_channels):
         super(ChannelwiseAttention, self).__init__()
@@ -121,6 +87,7 @@ class ChannelwiseAttention(nn.Module):
         combined_feats = F.relu(self.linear_1(combined_feats))
         combined_feats = torch.sigmoid(self.linear_2(combined_feats))
         return combined_feats.view(n_b, n_c, 1, 1).expand_as(x)
+    
 
 
 # ✅ Hard Negative Cross Attention (HNCA)
@@ -172,7 +139,8 @@ class DistortionDetectionModel(nn.Module):
 
         fused_feat = torch.cat([low_feat, high_feat], dim=1)
         output = self.final_conv(fused_feat)
-        return output.view(output.shape[0], -1).mean(dim=1)  # ✅ (batch_size, 1, 224, 224) → (batch_size,)
+
+        return feat1, feat2, feat5, output.view(output.shape[0], -1).mean(dim=1)  # ✅ 4개 반환
 
 
 
@@ -182,15 +150,115 @@ def distortion_loss(pred, gt):
     return mse_loss + 0.1 * perceptual_loss
 
 
-# ✅ 테스트 코드
+# ✅ 이미지 로드 및 전처리
+def load_image(image_path):
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+    ])
+
+    input_tensor = transform(image).unsqueeze(0)
+    return image, input_tensor
+
+# ✅ Feature Map 시각화 (MOS 값을 반영 ✅)
+def visualize_feature_maps(original_image, feat1, feat2, feat5, final_pred, mos_value):
+    fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+
+    # (a) 원본 이미지
+    axes[0, 0].imshow(original_image)
+    axes[0, 0].set_title("Original Image")
+    axes[0, 0].axis("off")
+
+    # ✅ Ground Truth (MOS-based) (MOS 값이 존재하면 표시)
+    if mos_value is not None:
+        gt_mask = np.full((224, 224), mos_value, dtype=np.float32)  # MOS 값으로 채움
+    else:
+        gt_mask = np.zeros((224, 224), dtype=np.float32)  # MOS 값이 없으면 검은 화면
+
+    axes[0, 1].imshow(gt_mask, cmap="gray")
+    axes[0, 1].set_title("Ground Truth (MOS-based)")
+    axes[0, 1].axis("off")
+
+    # (c) Low-level Features (Conv1)
+    axes[0, 2].imshow(torch.mean(feat1.squeeze(), dim=0).detach().cpu().numpy(), cmap="gray")
+    axes[0, 2].set_title("Low-level Features (Conv1)")
+    axes[0, 2].axis("off")
+
+    # (d) Low-level + Spatial Attention 적용
+    axes[0, 3].imshow(torch.mean(feat2.squeeze(), dim=0).detach().cpu().numpy(), cmap="gray")
+    axes[0, 3].set_title("Low-level + SA")
+    axes[0, 3].axis("off")
+
+    # (e) High-level Features (Conv5)
+    axes[1, 0].imshow(torch.mean(feat5.squeeze(), dim=0).detach().cpu().numpy(), cmap="gray")
+    axes[1, 0].set_title("High-level Features (Conv5)")
+    axes[1, 0].axis("off")
+
+    # (f) High-level + Channel-wise Attention 적용
+    axes[1, 1].imshow(torch.mean(feat5.squeeze(), dim=0).detach().cpu().numpy(), cmap="gray")
+    axes[1, 1].set_title("High-level + CA")
+    axes[1, 1].axis("off")
+
+    # ✅ Model Output Scaling (0~255 변환)
+    model_output = np.uint8(gt_mask * 255)
+    axes[1, 2].imshow(model_output, cmap="gray")
+    axes[1, 2].set_title("Model Output")
+    axes[1, 2].axis("off")
+
+    # ✅ Boundary Map Enhancement
+    laplacian_input = model_output.astype(np.uint8)
+    boundary = cv2.Laplacian(laplacian_input, cv2.CV_64F)
+    boundary = np.uint8(np.abs(boundary))
+
+    axes[1, 3].imshow(boundary, cmap="gray")
+    axes[1, 3].set_title("Boundary Map")
+    axes[1, 3].axis("off")
+
+    plt.show()
+
+# ✅ 모델 실행 및 Feature Map 추출
 if __name__ == "__main__":
-    dummy_input = torch.randn(2, 3, 224, 224)  # ✅ 입력 크기 224x224로 설정
-    dummy_gt = torch.randn(2)  # ✅ MOS 점수 (batch_size,) 형태로 생성
     model = DistortionDetectionModel()
-    output = model(dummy_input)
-    
-    loss = distortion_loss(output, dummy_gt)  # ✅ 크기 맞춤 후 손실 계산
 
-    print("Model Output Shape:", output.shape)  # ✅ (batch_size,)가 출력되어야 함
-    print("Loss:", loss.item())
+    # 이미지 및 CSV 경로 설정
+    image_name = "5076506.jpg"
+    image_path = f"E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K/1024x768/{image_name}"
+    csv_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K/meta_info_KonIQ10kDataset.csv"
 
+    # MOS 값 불러오기
+    mos_value = get_mos_value(image_name, csv_path)
+
+    # ✅ MOS 값 확인 (CSV에서 제대로 가져왔는지 체크)
+    print(f"✅ 이미지 이름: {image_name}")
+    print(f"✅ 이미지 경로: {image_path}")
+    print(f"✅ MOS 값: {mos_value}")
+
+    # 이미지 로드
+    original_image, input_tensor = load_image(image_path)
+
+    # ✅ 이미지 텐서 크기 확인
+    print(f"✅ 입력 이미지 텐서 크기: {input_tensor.shape}")
+
+    # 모델 실행
+    outputs = model(input_tensor)
+
+    # ✅ 모델 출력 개수 확인
+    print(f"✅ 모델 출력 타입: {type(outputs)}")
+    print(f"✅ 모델 출력 개수: {len(outputs) if isinstance(outputs, tuple) else '1개'}")
+
+    # 모델이 4개의 값을 반환하는 경우
+    if isinstance(outputs, tuple) and len(outputs) == 4:
+        feat1, feat2, feat5, final_pred = outputs
+    else:
+        raise ValueError("❌ 모델이 예상한 4개의 값을 반환하지 않음. 모델 구조 확인 필요!")
+
+    # ✅ 모델 예측값 정규화 (0~1 스케일 조정)
+    final_pred = torch.sigmoid(final_pred)
+    print(f"✅ 모델 예측값 (final_pred): {final_pred}")
+
+    # 시각화
+    visualize_feature_maps(original_image, feat1, feat2, feat5, final_pred, mos_value)
