@@ -1,6 +1,7 @@
 import os
 import torch
 import pandas as pd
+import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
@@ -26,7 +27,7 @@ class LIVEDataset(Dataset):
         if not os.path.isfile(scores_csv_path):
             raise FileNotFoundError(f"[Error] {scores_csv_path} 파일이 존재하지 않습니다.")
 
-        # ✅ CSV 파일 로드 (CSV 형식이 쉼표 구분자 사용)
+        # ✅ CSV 파일 로드 (쉼표 구분자 사용)
         df = pd.read_csv(scores_csv_path, sep=",")
 
         # ✅ 이미지 및 MOS 점수 로드
@@ -37,7 +38,7 @@ class LIVEDataset(Dataset):
             image_rel_path = row["dis_img_path"].strip()
             mos_score = row["score"]
 
-            # ✅ 올바른 이미지 경로로 설정
+            # ✅ 올바른 이미지 경로 설정
             image_name = os.path.basename(image_rel_path)  # 예: "101.bmp"
             image_path = os.path.join(images_dir, image_name)  # 예: "E:/.../Images/101.bmp"
 
@@ -49,6 +50,18 @@ class LIVEDataset(Dataset):
 
         if len(self.image_paths) == 0:
             raise ValueError(f"[Error] 이미지 파일이 존재하지 않습니다. {scores_csv_path} 내용을 확인하세요.")
+
+        # ✅ MOS 값 검사 및 정리 (NaN/Inf 처리)
+        self.mos = np.array(self.mos, dtype=np.float32)
+        print(f"[Check] 총 MOS 값 개수: {len(self.mos)}")
+        print(f"[Check] NaN 개수: {np.isnan(self.mos).sum()}, Inf 개수: {np.isinf(self.mos).sum()}")
+
+        if np.isnan(self.mos).sum() > 0 or np.isinf(self.mos).sum() > 0:
+            self.mos = np.nan_to_num(self.mos, nan=0.5, posinf=1.0, neginf=0.0)  # NaN을 0.5로 대체
+
+        # ✅ MOS 값 정규화 (0~1 범위)
+        self.mos = (self.mos - np.min(self.mos)) / (np.max(self.mos) - np.min(self.mos))
+        print(f"[Check] MOS 최소값: {np.min(self.mos)}, 최대값: {np.max(self.mos)}")
 
         print(f"[INFO] 로드된 이미지 개수: {len(self.image_paths)}, MOS 점수 개수: {len(self.mos)}")
 
@@ -94,3 +107,4 @@ if __name__ == "__main__":
     print(f"\n[Authentic] 샘플 확인:")
     for i in range(4):  
         print(f"  Sample {i+1} - MOS: {sample_batch_authentic['mos'][i]}")
+

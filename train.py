@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 from pathlib import Path
 from scipy import stats
-from data.dataset_kadid10k import KADID10KDataset
+from data.dataset_koniq10k import KONIQ10KDataset
 from models.attention_se import DistortionDetectionModel
 from utils.utils import load_config
 
@@ -121,6 +121,8 @@ def save_checkpoint(model, checkpoint_path, epoch, srocc):
     filename = f"epoch_{epoch}_srocc_{srocc:.3f}.pth"
     torch.save(model.state_dict(), Path(checkpoint_path) / filename)
 
+
+
 # ✅ 메인 실행
 if __name__ == "__main__":
     # ✅ 설정 파일 로드
@@ -132,7 +134,7 @@ if __name__ == "__main__":
 
     # ✅ 데이터셋 로드
     dataset_path = Path(args.data_base_path)
-    dataset = KADID10KDataset(str(dataset_path), crop_size=224)
+    dataset = KONIQ10KDataset(str(dataset_path), crop_size=224)
 
 
     train_size = int(0.7 * len(dataset))
@@ -171,7 +173,6 @@ if __name__ == "__main__":
     })
 
     print("🔹 **Final Test Metrics:** 🔹", test_metrics)
-
 
 # KONIQ
 """ 

@@ -1,3 +1,5 @@
+# 기존 논문 방법
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,7 +29,7 @@ class VGG16FeatureExtractor(nn.Module):
         return feat1, feat2, feat3, feat4, feat5
 
 
-# ✅ Context-aware Pyramid Feature Extraction (CPFE)
+# ✅ Context-aware Pyramid Feature Extraction (CPFE 1)
 class CPFE(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(CPFE, self).__init__()
@@ -46,8 +48,30 @@ class CPFE(nn.Module):
         fused = torch.cat([feat1, feat2, feat3], dim=1)
         return self.fuse_conv(fused)
 
+# ✅ Context-aware Pyramid Feature Extraction (CPFE 2)
+""" class CPFE(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(CPFE, self).__init__()
 
-# ✅ Spatial Attention (SA) for Distortion Detection
+        self.conv1x1 = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        self.conv3x3_r3 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=3, dilation=3)
+        self.conv3x3_r5 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=5, dilation=5)
+        self.conv3x3_r7 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=7, dilation=7)
+
+        self.fuse_conv = nn.Conv2d(out_channels * 4, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        feat1 = self.conv1x1(x)
+        feat2 = self.conv3x3_r3(x)
+        feat3 = self.conv3x3_r5(x)
+        feat4 = self.conv3x3_r7(x)
+
+        fused = torch.cat([feat1, feat2, feat3, feat4], dim=1)
+        return self.fuse_conv(fused) """
+
+
+
+# ✅ Spatial Attention (SA) for Distortion Detection (1)
 class SpatialAttention(nn.Module):
     def __init__(self, in_channels):
         super(SpatialAttention, self).__init__()
@@ -56,6 +80,22 @@ class SpatialAttention(nn.Module):
     def forward(self, x):
         attn = torch.sigmoid(self.conv(x))
         return x * attn
+    
+# ✅ Spatial Attention (SA) for Distortion Detection (2)
+""" class SpatialAttention(nn.Module):
+    def __init__(self, in_channels):
+        super(SpatialAttention, self).__init__()
+
+        self.conv1xk = nn.Conv2d(in_channels, in_channels // 2, kernel_size=(1, 7), padding=(0, 3))
+        self.convkx1 = nn.Conv2d(in_channels, in_channels // 2, kernel_size=(7, 1), padding=(3, 0))
+        self.convk1 = nn.Conv2d(in_channels // 2, 1, kernel_size=1)
+
+    def forward(self, x):
+        attn_h = self.conv1xk(x)
+        attn_w = self.convkx1(x)
+        attn = torch.sigmoid(self.convk1(attn_h + attn_w))
+        return x * attn """
+
 
 
 # ✅ Channel-wise Attention (CA) for Distortion Detection
@@ -130,10 +170,6 @@ class DistortionDetectionModel(nn.Module):
 
 
 def distortion_loss(pred, gt):
-    """
-    `pred`: (batch_size,) → MOS 점수와 비교
-    `gt`: (batch_size,) → MOS 점수
-    """
     mse_loss = nn.MSELoss()(pred, gt)  # ✅ MOS 값과 직접 비교
     perceptual_loss = torch.mean(torch.abs(pred - gt))  # ✅ L1 Loss 추가
     return mse_loss + 0.1 * perceptual_loss
@@ -150,3 +186,5 @@ if __name__ == "__main__":
 
     print("Model Output Shape:", output.shape)  # ✅ (batch_size,)가 출력되어야 함
     print("Loss:", loss.item())
+
+
