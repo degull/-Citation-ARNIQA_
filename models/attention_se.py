@@ -4,6 +4,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from torchvision.transforms import ToPILImage
+from torchvision.transforms.functional import to_pil_image
+
+
 
 
 # ✅ VGG-16을 활용한 특징 추출
@@ -186,5 +193,4 @@ if __name__ == "__main__":
 
     print("Model Output Shape:", output.shape)  # ✅ (batch_size,)가 출력되어야 함
     print("Loss:", loss.item())
-
 
