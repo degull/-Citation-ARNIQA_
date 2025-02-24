@@ -3,14 +3,16 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-from PIL import ImageEnhance, ImageFilter, Image
-import numpy as np
-import io
+from PIL import Image
+
 
 class KONIQ10KDataset(Dataset):
     def __init__(self, root: str, phase: str = "all", crop_size: int = 224):
         """
-        KONIQ10K는 "Authentic" 데이터셋이므로 Hard Negative 적용 없이 원본 이미지만 사용.
+        ✅ DistortionDetectionModel에 적합하도록 데이터셋 수정
+        - `img_A`(왜곡된 이미지)만 반환
+        - `img_B`(참조 이미지) 제거
+        - `mos`(Mean Opinion Score) 점수 반환
         """
         super().__init__()
         self.root = root
@@ -47,8 +49,7 @@ class KONIQ10KDataset(Dataset):
 
     def __getitem__(self, index: int):
         """
-        ✅ KONIQ10K는 Authentic 데이터셋이므로 Hard Negative 적용 없이 원본 이미지만 사용.
-        ✅ `img_A`와 `img_B`는 동일한 원본 이미지.
+        ✅ `img_A`(왜곡된 이미지)와 `mos`(Mean Opinion Score)만 반환
         """
         image_path = self.image_paths[index]
         mos = self.mos[index]
@@ -60,11 +61,9 @@ class KONIQ10KDataset(Dataset):
             return None
 
         img_A_transformed = self.transform(img_A)  # ✅ 변환 적용
-        img_B_transformed = img_A_transformed  # ✅ img_B는 img_A와 동일하게 설정
 
         return {
-            "img_A": img_A_transformed,  # 원본 이미지
-            "img_B": img_B_transformed,  # ✅ Hard Negative 적용 없이 동일한 이미지 사용
+            "img_A": img_A_transformed,  # ✅ 원본 이미지
             "mos": torch.tensor(mos, dtype=torch.float32),
         }
 
@@ -88,4 +87,3 @@ if __name__ == "__main__":
     print(f"\n[Authentic] 샘플 확인:")
     for i in range(4):  
         print(f"  Sample {i+1} - MOS: {sample_batch_authentic['mos'][i]}")
-

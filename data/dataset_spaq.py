@@ -1,15 +1,18 @@
 import os
 import pandas as pd
-import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 
+
 class SPAQDataset(Dataset):
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         """
-        SPAQ는 Authentic 데이터셋이므로 Hard Negative를 적용하지 않고 원본 이미지만 사용합니다.
+        ✅ DistortionDetectionModel에 적합하도록 데이터셋 수정
+        - `img_A`(왜곡된 이미지)만 반환
+        - `img_B`(참조 이미지) 제거
+        - `mos`(Mean Opinion Score) 점수 반환
         """
         super().__init__()
         self.root = str(root)
@@ -46,18 +49,17 @@ class SPAQDataset(Dataset):
         ])
 
     def __getitem__(self, index: int):
-        """ 데이터셋에서 index 번째 샘플을 반환 """
+        """ ✅ `img_A`(왜곡된 이미지)와 `mos`(Mean Opinion Score)만 반환 """
         try:
-            img = Image.open(self.image_paths[index]).convert("RGB")  # ✅ 원본 이미지
+            img_A = Image.open(self.image_paths[index]).convert("RGB")  # ✅ 원본 이미지
         except Exception as e:
             print(f"[Error] Loading image: {self.image_paths[index]}: {e}")
             return None
 
-        img_transformed = self.transform(img)
+        img_A_transformed = self.transform(img_A)
 
         return {
-            "img_A": img_transformed,  # ✅ 원본 이미지
-            "img_B": img_transformed,  # ✅ Authentic 데이터셋이므로 img_B도 동일한 원본 이미지
+            "img_A": img_A_transformed,  # ✅ 원본 이미지
             "mos": torch.tensor(self.mos[index], dtype=torch.float32),
         }
 
@@ -65,7 +67,7 @@ class SPAQDataset(Dataset):
         return len(self.images)
 
 
-# ✅ SPAQDataset 테스트 (KONIQ10K 방식 적용)
+# ✅ SPAQDataset 테스트 코드
 if __name__ == "__main__":
     """
     ✅ SPAQ는 Authentic 데이터셋이므로 Hard Negative 없이 원본 이미지만 사용.

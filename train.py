@@ -1,202 +1,139 @@
-
 import torch
 import torch.nn as nn
+import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 import numpy as np
-from dotmap import DotMap
+from tqdm import tqdm
 from pathlib import Path
 from scipy import stats
-from tqdm import tqdm
-from sklearn.linear_model import Ridge
-from data import KADID10KDataset
-from models.simclr import SimCLR
-from utils.utils import parse_config
-from utils.utils_distortions import generate_hard_negatives
-import yaml
-import torch.nn.functional as F
-from torch.nn.utils import clip_grad_norm_
-import random
-from sklearn.model_selection import GridSearchCV
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
+from data.dataset_kadid10k import KADID10KDataset
+from models.attention_se import DistortionDetectionModel
+from utils.utils import load_config
 
-# Config loader
-def load_config(config_path: str) -> DotMap:
-    with open(config_path, 'r') as file:
-        config = yaml.safe_load(file)
-    return DotMap(config)
+# ✅ 손실 함수 (MSE + Perceptual Loss)
+def distortion_loss(pred, gt):
+    mse_loss = nn.MSELoss()(pred, gt)
+    perceptual_loss = torch.mean(torch.abs(pred - gt))
+    return mse_loss + 0.1 * perceptual_loss
 
-def save_checkpoint(model: nn.Module, checkpoint_path: Path, epoch: int, srocc: float) -> None:
-    filename = f"epoch_{epoch}_srocc_{srocc:.3f}.pth"
-    torch.save(model.state_dict(), checkpoint_path / filename)
-
-def calculate_srcc_plcc(proj_A, proj_B):
-    proj_A, proj_B = proj_A.detach().cpu().numpy(), proj_B.detach().cpu().numpy()
-    srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
-    plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
+# ✅ SROCC 및 PLCC 계산
+def calculate_srcc_plcc(preds, targets):
+    preds, targets = preds.cpu().numpy(), targets.cpu().numpy()
+    srocc, _ = stats.spearmanr(preds.flatten(), targets.flatten())
+    plcc, _ = stats.pearsonr(preds.flatten(), targets.flatten())
     return srocc, plcc
 
-def validate(args, model, dataloader, device):
+# ✅ 학습 루프
+def train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler, device):
+    best_srocc = -1
+    model.train()
+
+    train_losses = []
+    val_srocc_values, val_plcc_values = [], []
+
+    for epoch in range(args.training.epochs):
+        running_loss = 0.0
+        progress_bar = tqdm(train_dataloader, desc=f"Epoch [{epoch + 1}/{args.training.epochs}]")
+
+        for batch in progress_bar:
+            img_A = batch["img_A"].to(device)
+            targets = batch["mos"].to(device)
+
+            optimizer.zero_grad()
+
+            # ✅ 모델 예측
+            preds = model(img_A)
+
+            # ✅ 손실 함수 계산
+            loss = distortion_loss(preds, targets)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+            progress_bar.set_postfix(loss=running_loss / (len(progress_bar) + 1))
+
+        avg_loss = running_loss / len(train_dataloader)
+        train_losses.append(avg_loss)
+
+        # ✅ 검증
+        val_srocc, val_plcc = validate(model, val_dataloader, device)
+        val_srocc_values.append(val_srocc)
+        val_plcc_values.append(val_plcc)
+
+        # ✅ 모델 저장
+        if val_srocc > best_srocc:
+            best_srocc = val_srocc
+            save_checkpoint(model, args.checkpoint_base_path, epoch, val_srocc)
+
+        print(f"\n🔹 Epoch {epoch+1}: Loss: {avg_loss:.6f}, Val SROCC: {val_srocc:.6f}, Val PLCC: {val_plcc:.6f}")
+
+        lr_scheduler.step()
+
+    print("\n✅ **Training Completed** ✅")
+
+    return {
+        "loss": train_losses,
+        "srocc": val_srocc_values,
+        "plcc": val_plcc_values
+    }
+
+# ✅ 검증 루프
+def validate(model, dataloader, device):
     model.eval()
     srocc_values, plcc_values = [], []
 
     with torch.no_grad():
         for batch in dataloader:
-            inputs_A = batch["img_A"].to(device)
-            inputs_B = batch["img_B"].to(device)
+            img_A = batch["img_A"].to(device)
+            targets = batch["mos"].to(device)
 
-            if inputs_A.dim() == 5:
-                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
-                inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
-
-            proj_A, proj_B = model(inputs_A, inputs_B)
-
-            proj_A, proj_B = F.normalize(proj_A, dim=1).cpu().numpy(), F.normalize(proj_B, dim=1).cpu().numpy()
-            srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
-            plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
+            preds = model(img_A)
+            srocc, plcc = calculate_srcc_plcc(preds, targets)
 
             srocc_values.append(srocc)
             plcc_values.append(plcc)
 
     return np.mean(srocc_values), np.mean(plcc_values)
 
-
-def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, device):
-    checkpoint_path = Path(str(args.checkpoint_base_path))
-    checkpoint_path.mkdir(parents=True, exist_ok=True)
-    best_srocc = -1
-
-    train_losses = []
-    val_srocc_values, val_plcc_values = [], []
-    test_srocc_values, test_plcc_values = [], []
-
-    print("\n🔹 **Training Start** 🔹")
-
-    for epoch in range(args.training.epochs):
-        model.train()
-        running_loss = 0.0
-        progress_bar = tqdm(train_dataloader, desc=f"Epoch [{epoch + 1}/{args.training.epochs}]")
-
-        for batch in progress_bar:
-            inputs_A = batch["img_A"].to(device)
-            inputs_B = batch["img_B"].to(device)
-
-            if inputs_A.dim() == 5:
-                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
-                inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
-
-            # ✅ Hard Negative 샘플 생성
-            hard_negatives = generate_hard_negatives(inputs_B, scale_factor=0.5)
-
-            if hard_negatives.dim() == 5:
-                hard_negatives = hard_negatives.view(-1, *hard_negatives.shape[2:]).to(device)
-            elif hard_negatives.dim() != 4:
-                raise ValueError(f"[Error] Unexpected hard_negatives dimensions: {hard_negatives.shape}")
-
-            optimizer.zero_grad()
-
-            with torch.amp.autocast(device_type="cuda"):
-                proj_A, proj_B = model(inputs_A, inputs_B)
-
-                proj_A, proj_B = F.normalize(proj_A, dim=1), F.normalize(proj_B, dim=1)
-
-                # ✅ Hard Negative Feature Backbone 통과
-                features_negatives = model.backbone(hard_negatives)
-                if features_negatives.dim() == 4:
-                    features_negatives = features_negatives.mean([2, 3])
-                elif features_negatives.dim() != 2:
-                    raise ValueError(f"[Error] Unexpected features_negatives dimensions: {features_negatives.shape}")
-
-                proj_negatives = F.normalize(model.projector(features_negatives), dim=1)
-
-                # ✅ Hard Negative 포함하여 Loss 계산
-                loss = model.compute_loss(proj_A, proj_B, proj_negatives)
-
-            if torch.isnan(loss) or torch.isinf(loss):
-                print("[Warning] NaN or Inf detected in loss. Skipping batch.")
-                continue
-
-            loss.backward()
-            clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            running_loss += loss.item()
-
-            progress_bar.set_postfix(loss=running_loss / (len(progress_bar) + 1))
-
-        avg_loss = running_loss / len(train_dataloader)
-        train_losses.append(avg_loss)
-
-        # Validation & Test
-        val_srocc, val_plcc = validate(args, model, val_dataloader, device)
-        val_srocc_values.append(val_srocc)
-        val_plcc_values.append(val_plcc)
-
-        test_metrics = test(args, model, test_dataloader, device)
-        test_srocc_values.append(test_metrics['srcc'])
-        test_plcc_values.append(test_metrics['plcc'])
-
-        # Learning Rate Scheduler
-        lr_scheduler.step()
-
-        # ✅ Epoch별 결과 출력
-        print(f"\n🔹 **Epoch [{epoch + 1}/{args.training.epochs}] Results** 🔹")
-        print(f"📌 Loss: {avg_loss:.6f}")
-        print(f"📌 Validation SROCC: {val_srocc:.6f}, PLCC: {val_plcc:.6f}")
-        print(f"📌 Test SROCC: {test_metrics['srcc']:.6f}, PLCC: {test_metrics['plcc']:.6f}")
-
-        # ✅ Best Model 저장
-        if val_srocc > best_srocc:
-            best_srocc = val_srocc
-            save_checkpoint(model, checkpoint_path, epoch, val_srocc)
-
-    print("\n✅ **Training Completed** ✅")
-
-    # ✅ 모든 Epoch 결과 저장하여 반환
-    return {
-        "loss": train_losses,
-        "srocc": val_srocc_values,
-        "plcc": val_plcc_values
-    }, {
-        "srocc": val_srocc_values,
-        "plcc": val_plcc_values
-    }, {
-        "srocc": test_srocc_values,
-        "plcc": test_plcc_values
-    }
-
-
-def test(args, model, test_dataloader, device):
+# ✅ 테스트 루프 (추가)
+def test(model, test_dataloader, device):
     model.eval()
     srocc_values, plcc_values = [], []
 
     with torch.no_grad():
         for batch in test_dataloader:
-            inputs_A = batch["img_A"].to(device)
-            inputs_B = batch["img_B"].to(device)
+            img_A = batch["img_A"].to(device)
+            targets = batch["mos"].to(device)
 
-            if inputs_A.dim() == 5:
-                inputs_A = inputs_A.view(-1, *inputs_A.shape[2:])
-            if inputs_B.dim() == 5:
-                inputs_B = inputs_B.view(-1, *inputs_B.shape[2:])
-
-            proj_A, proj_B = model(inputs_A, inputs_B)
-
-            proj_A, proj_B = F.normalize(proj_A, dim=1).cpu().numpy(), F.normalize(proj_B, dim=1).cpu().numpy()
-            srocc, _ = stats.spearmanr(proj_A.flatten(), proj_B.flatten())
-            plcc, _ = stats.pearsonr(proj_A.flatten(), proj_B.flatten())
+            preds = model(img_A)
+            srocc, plcc = calculate_srcc_plcc(preds, targets)
 
             srocc_values.append(srocc)
             plcc_values.append(plcc)
 
-    return {'srcc': np.mean(srocc_values), 'plcc': np.mean(plcc_values)}
+    return {
+        "srocc": srocc_values,
+        "plcc": plcc_values
+    }
 
+# ✅ 모델 저장 함수
+def save_checkpoint(model, checkpoint_path, epoch, srocc):
+    filename = f"epoch_{epoch}_srocc_{srocc:.3f}.pth"
+    torch.save(model.state_dict(), Path(checkpoint_path) / filename)
+
+# ✅ 메인 실행
 if __name__ == "__main__":
+    # ✅ 설정 파일 로드
     config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
     args = load_config(config_path)
 
+    # ✅ GPU 설정
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+
+    # ✅ 데이터셋 로드
     dataset_path = Path(args.data_base_path)
-    dataset = KADID10KDataset(str(dataset_path))
+    dataset = KADID10KDataset(str(dataset_path), crop_size=224)
+
 
     train_size = int(0.7 * len(dataset))
     val_size = int(0.1 * len(dataset))
@@ -208,27 +145,33 @@ if __name__ == "__main__":
     val_dataloader = DataLoader(val_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
     test_dataloader = DataLoader(test_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
 
-    model = SimCLR(embedding_dim=128, temperature=args.model.temperature).to(device)
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.training.learning_rate, momentum=0.9, weight_decay=1e-4)
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-6)
+    # ✅ 모델 생성
+    model = DistortionDetectionModel().to(device)
 
-    train_metrics, val_metrics, test_metrics = train(
-        args,
-        model,
-        train_dataloader,
-        val_dataloader,
-        test_dataloader,
-        optimizer,
-        lr_scheduler,
-        device
-    )
+    # ✅ 옵티마이저 및 스케줄러 설정
+    optimizer = optim.SGD(model.parameters(), lr=args.training.learning_rate, momentum=0.9, weight_decay=1e-4)
+    lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-6)
 
-    print("\n🔹 **Final Training Metrics:** 🔹")
+    # ✅ 학습 시작
+    train_metrics = train(args, model, train_dataloader, val_dataloader, optimizer, lr_scheduler, device)
+
+    # ✅ 테스트 수행
+    test_metrics = test(model, test_dataloader, device)
+
+    # ✅ 최종 결과 출력
+    print("\n✅ **Training Completed** ✅\n")
+
+    print("🔹 **Final Training Metrics:** 🔹")
     for epoch, (loss, srocc, plcc) in enumerate(zip(train_metrics["loss"], train_metrics["srocc"], train_metrics["plcc"])):
         print(f"📌 **Epoch {epoch+1}:** Loss: {loss:.6f}, SROCC: {srocc:.6f}, PLCC: {plcc:.6f}")
 
-    print("\n🔹 **Final Validation Metrics:** 🔹", val_metrics)
+    print("\n🔹 **Final Validation Metrics:** 🔹", {
+        "srocc": train_metrics["srocc"],
+        "plcc": train_metrics["plcc"]
+    })
+
     print("🔹 **Final Test Metrics:** 🔹", test_metrics)
+
 
 # KONIQ
 """ 

@@ -1,8 +1,6 @@
 import os
 import torch
-import numpy as np
 import pandas as pd
-import random
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
@@ -11,9 +9,10 @@ from torchvision import transforms
 class LIVEDataset(Dataset):
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
         """
-        ✅ LIVE-Challenge 데이터셋 (Authentic Dataset)  
-        - img_A: 원본 이미지  
-        - img_B: 원본 이미지 (Hard Negative X)  
+        ✅ DistortionDetectionModel에 적합하도록 데이터셋 수정
+        - `img_A`(왜곡된 이미지)만 반환
+        - `img_B`(참조 이미지) 제거
+        - `mos`(Mean Opinion Score) 점수 반환
         """
         super().__init__()
         self.root = root
@@ -60,23 +59,18 @@ class LIVEDataset(Dataset):
 
     def __getitem__(self, index: int):
         """
-        ✅ LIVE-C 데이터셋에서 index 번째 샘플을 반환
-        - img_A: 원본 이미지  
-        - img_B: 원본 이미지 (Authentic Dataset → Hard Negative 적용 X)  
+        ✅ `img_A`(왜곡된 이미지)와 `mos`(Mean Opinion Score)만 반환
         """
         try:
-            img_A_orig = Image.open(self.image_paths[index]).convert("RGB")  # ✅ 원본 이미지 사용
+            img_A = Image.open(self.image_paths[index]).convert("RGB")  # ✅ 원본 이미지 사용
         except Exception as e:
             print(f"[Error] Loading image: {self.image_paths[index]}: {e}")
             return None
 
-        # ✅ img_A, img_B는 동일한 원본 이미지 사용
-        img_A_transformed = self.transform(img_A_orig)
-        img_B_transformed = self.transform(img_A_orig)
+        img_A_transformed = self.transform(img_A)  # ✅ 변환 적용
 
         return {
             "img_A": img_A_transformed,  # ✅ 원본 이미지
-            "img_B": img_B_transformed,  # ✅ 원본 이미지 그대로 유지 (Hard Negative 없음)
             "mos": torch.tensor(self.mos[index], dtype=torch.float32),
         }
 
@@ -86,7 +80,7 @@ class LIVEDataset(Dataset):
 
 if __name__ == "__main__":
     """
-    ✅ LIVE-C는 Authentic 데이터셋이므로 Hard Negative 없이 원본 이미지만 사용.
+    ✅ LIVE-Challenge는 Authentic 데이터셋이므로 Hard Negative 없이 원본 이미지만 사용.
     """
     dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE"
 

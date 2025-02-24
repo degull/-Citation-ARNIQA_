@@ -1,30 +1,40 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from PIL import Image
-import matplotlib.pyplot as plt
-from torchvision import transforms
-import cv2
-import seaborn as sns
-import scipy.stats
+import torchvision.models as models
 
-# 논문
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
+# ✅ VGG-16을 활용한 특징 추출
+class VGG16FeatureExtractor(nn.Module):
+    def __init__(self):
+        super(VGG16FeatureExtractor, self).__init__()
+        vgg16 = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1).features
+
+        # VGG-16에서 필요한 특징 추출 계층
+        self.conv1_2 = nn.Sequential(*vgg16[:4])  # Conv1_2
+        self.conv2_2 = nn.Sequential(*vgg16[4:9])  # Conv2_2
+        self.conv3_3 = nn.Sequential(*vgg16[9:16])  # Conv3_3
+        self.conv4_3 = nn.Sequential(*vgg16[16:23])  # Conv4_3
+        self.conv5_3 = nn.Sequential(*vgg16[23:30])  # Conv5_3
+
+    def forward(self, x):
+        feat1 = self.conv1_2(x)  # (B, 64, 256, 256)
+        feat2 = self.conv2_2(feat1)  # (B, 128, 128, 128)
+        feat3 = self.conv3_3(feat2)  # (B, 256, 64, 64)
+        feat4 = self.conv4_3(feat3)  # (B, 512, 32, 32)
+        feat5 = self.conv5_3(feat4)  # (B, 512, 16, 16)
+
+        return feat1, feat2, feat3, feat4, feat5
+
+
+# ✅ Context-aware Pyramid Feature Extraction (CPFE)
 class CPFE(nn.Module):
-    """ Context-aware Pyramid Feature Extraction (CPFE) """
     def __init__(self, in_channels, out_channels):
         super(CPFE, self).__init__()
 
-        self.conv1x1 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-        self.conv3x3 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        self.conv5x5 = nn.Conv2d(in_channels, out_channels, kernel_size=5, stride=1, padding=2)
-
-        self.batch_norm = nn.BatchNorm2d(out_channels * 3)  # Concat 후 batch norm
-        self.activation = nn.ReLU(inplace=True)
+        self.conv1x1 = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        self.conv3x3 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv5x5 = nn.Conv2d(in_channels, out_channels, kernel_size=5, padding=2)
 
         self.fuse_conv = nn.Conv2d(out_channels * 3, out_channels, kernel_size=1)
 
@@ -34,201 +44,109 @@ class CPFE(nn.Module):
         feat3 = self.conv5x5(x)
 
         fused = torch.cat([feat1, feat2, feat3], dim=1)
-        fused = self.batch_norm(fused)
-        fused = self.activation(fused)
-
         return self.fuse_conv(fused)
 
-class FeatureLevelAttention(nn.Module):
-    """ 논문에 맞게 CPFE + Channel Attention (CA) + Spatial Attention (SA) 적용 """
-    def __init__(self, in_channels, out_channels):
-        super(FeatureLevelAttention, self).__init__()
-        self.out_channels = out_channels
 
-        # ✅ CPFE (Pyramid Feature Extraction)
-        self.cpfe = CPFE(in_channels, out_channels)
-
-        # ✅ Channel-wise Attention (CA)
-        self.channel_fc1 = nn.Linear(out_channels, out_channels // 4)
-        self.channel_fc2 = nn.Linear(out_channels // 4, out_channels)
-
-        # ✅ Spatial Attention (SA)
-        self.spatial_conv1 = nn.Conv2d(out_channels, out_channels // 2, kernel_size=(1, 9), padding=(0, 4))
-        self.spatial_bn1 = nn.BatchNorm2d(out_channels // 2)
-        self.spatial_conv2 = nn.Conv2d(out_channels // 2, 1, kernel_size=(9, 1), padding=(4, 0))
-        self.spatial_bn2 = nn.BatchNorm2d(1)
-
-        # ✅ Feature Update
-        self.feature_update_conv = nn.Conv2d(out_channels, out_channels, kernel_size=1)
-        self.batch_norm = nn.BatchNorm2d(out_channels)
-        self.activation = nn.ReLU()
+# ✅ Spatial Attention (SA) for Distortion Detection
+class SpatialAttention(nn.Module):
+    def __init__(self, in_channels):
+        super(SpatialAttention, self).__init__()
+        self.conv = nn.Conv2d(in_channels, 1, kernel_size=7, padding=3)
 
     def forward(self, x):
-        if len(x.shape) == 2:  # ✅ 2D일 경우 강제 변환
-            x = x.view(x.shape[0], x.shape[1], 1, 1)
-
-        b, c, h, w = x.size()  # ✅ 이제 오류 없음!
+        attn = torch.sigmoid(self.conv(x))
+        return x * attn
 
 
-        # ✅ Channel-wise Attention (CA)
-        channel_weights = F.adaptive_avg_pool2d(x, (1, 1)).view(b, c)
-        channel_weights = F.relu(self.channel_fc1(channel_weights))
-        channel_weights = torch.sigmoid(self.channel_fc2(channel_weights))
-        channel_weights = channel_weights.view(b, c, 1, 1)
-        channel_attention = x * channel_weights  # 채널별 가중치 적용
-
-        # ✅ Spatial Attention (SA)
-        spatial_weights = F.relu(self.spatial_bn1(self.spatial_conv1(channel_attention)))
-        spatial_weights = F.relu(self.spatial_bn2(self.spatial_conv2(spatial_weights)))
-        spatial_weights = torch.sigmoid(spatial_weights)
-        spatial_attention = channel_attention * spatial_weights  # 공간별 가중치 적용
-
-        # ✅ Feature Update & Residual Connection
-        out = self.feature_update_conv(spatial_attention)
-        out = self.batch_norm(out)
-        out = self.activation(out)
-        out = out + x  # Residual Connection 유지
-
-        return out
-
-    
-
-# Feature-Level Attention
-""" class FeatureLevelAttention(nn.Module):
-    def __init__(self, in_channels, out_channels, num_heads=8, dropout=0.3):
-        super(FeatureLevelAttention, self).__init__()
-
-        self.num_heads = num_heads
-        self.out_channels = out_channels
-
-        # ✅ 입력 채널 변환 (해상도 유지)
-        self.input_conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
-
-        assert out_channels % num_heads == 0, "out_channels must be divisible by num_heads"
-        self.head_dim = max(out_channels // num_heads, 1)
-        self.scale = self.head_dim ** -0.5  
-
-        # Query, Key, Value 생성
-        self.qkv_conv = nn.Conv2d(out_channels, out_channels * 3, kernel_size=3, stride=1, padding=1, bias=False)
-        self.output_proj = nn.Conv2d(out_channels, out_channels, kernel_size=1)
-
-        # Feature Update
-        self.feature_update_conv = nn.Conv2d(out_channels, out_channels, kernel_size=1)
-        self.batch_norm = nn.BatchNorm2d(out_channels)
-        self.activation = nn.SiLU()
-        self.dropout = nn.Dropout(dropout)
+# ✅ Channel-wise Attention (CA) for Distortion Detection
+class ChannelwiseAttention(nn.Module):
+    def __init__(self, in_channels):
+        super(ChannelwiseAttention, self).__init__()
+        self.linear_1 = nn.Linear(in_channels, in_channels // 4)
+        self.linear_2 = nn.Linear(in_channels // 4, in_channels)
 
     def forward(self, x):
-        b, c, h, w = x.size()  # ✅ 원본 입력 크기 가져오기
-
-        # ✅ 입력 채널 변환
-        x = self.input_conv(x)
-
-        # ✅ Query, Key, Value 생성
-        qkv = self.qkv_conv(x).reshape(b, self.num_heads, 3, self.head_dim, h, w)
-        q, k, v = torch.chunk(qkv, 3, dim=2)
-        q, k, v = q.squeeze(2), k.squeeze(2), v.squeeze(2)  
-
-        # ✅ Gumbel Softmax 적용
-        attention = F.gumbel_softmax(torch.matmul(q, k.transpose(-2, -1)) * self.scale, tau=0.8, hard=True, dim=-1)
-        A_final = torch.matmul(attention, v)  
-        A_final = A_final.reshape(b, self.out_channels, h, w)  # ✅ 원본 크기 유지
-
-        # ✅ **출력 크기를 원본 크기 (`h, w`)로 유지**
-        A_final = F.interpolate(A_final, size=(h, w), mode="bilinear", align_corners=False)
-
-        # 최종 Projection 적용
-        A_final = self.output_proj(A_final)
-        A_final = self.feature_update_conv(A_final)
-        A_final = self.batch_norm(A_final)
-        A_final = self.activation(A_final)
-        A_final = self.dropout(A_final)
-
-        # Residual Connection 적용
-        out = A_final + x  
-
-        return out
- """
+        n_b, n_c, _, _ = x.size()
+        avg_feats = F.adaptive_avg_pool2d(x, (1, 1)).view(n_b, n_c)
+        std_feats = torch.std(x.view(n_b, n_c, -1), dim=2)
+        std_feats = std_feats / (std_feats.max(dim=1, keepdim=True)[0] + 1e-6)
+        combined_feats = avg_feats + std_feats
+        combined_feats = F.relu(self.linear_1(combined_feats))
+        combined_feats = torch.sigmoid(self.linear_2(combined_feats))
+        return combined_feats.view(n_b, n_c, 1, 1).expand_as(x)
 
 
+# ✅ Hard Negative Cross Attention (HNCA)
 class HardNegativeCrossAttention(nn.Module):
-    def __init__(self, in_dim, num_heads=8, reduction=16, alpha=0.5):
+    def __init__(self, in_dim):
         super(HardNegativeCrossAttention, self).__init__()
         self.in_dim = in_dim
-        self.num_heads = num_heads  
-        self.alpha = alpha  
-
-        # ✅ 속성 정보 학습
-        self.attr_conv1 = nn.Conv2d(in_dim, in_dim // reduction, kernel_size=1)
-        self.attr_relu1 = nn.ReLU(inplace=True)
-        self.attr_conv2 = nn.Conv2d(in_dim // reduction, in_dim, kernel_size=1)
-        self.attr_relu2 = nn.ReLU(inplace=True)
-
-        # ✅ 텍스처 정보 학습
-        self.texture_conv1 = nn.Conv2d(in_dim, in_dim, kernel_size=3, padding=1)
-        self.texture_relu = nn.ReLU(inplace=True)
-        self.texture_conv2 = nn.ConvTranspose2d(in_dim, in_dim, kernel_size=3, padding=1)
-
-        # ✅ 속성 정보 Concat 후 1x1 Conv 적용
-        self.attr_dim_adjust = nn.Conv2d(in_dim * 2, in_dim, kernel_size=1)
-
-        # ✅ Multi-head Cross Attention에 필요한 Q, K, V 생성
-        self.head_dim = in_dim // num_heads
-        self.query_attr = nn.Linear(in_dim, in_dim)  
-        self.key_attr = nn.Linear(in_dim, in_dim)  
-        self.value_attr = nn.Linear(in_dim, in_dim)  
-
-        self.query_tex = nn.Linear(in_dim, in_dim)  
-        self.key_tex = nn.Linear(in_dim, in_dim)  
-        self.value_tex = nn.Linear(in_dim, in_dim)  
-
-        # ✅ 최종 Projection Layer
+        self.query = nn.Linear(in_dim, in_dim)
+        self.key = nn.Linear(in_dim, in_dim)
+        self.value = nn.Linear(in_dim, in_dim)
         self.output_proj = nn.Conv2d(in_dim, in_dim, kernel_size=1)
 
-        # ✅ BatchNorm2d 적용
-        self.norm = nn.BatchNorm2d(in_dim)
+    def forward(self, x):
+        b, c, h, w = x.shape
+        x_flat = x.view(b, c, -1).permute(0, 2, 1)
+        Q = self.query(x_flat)
+        K = self.key(x_flat)
+        V = self.value(x_flat)
 
-    def forward(self, x, hard_neg):
-        b, c, h, w = x.shape  
-
-        # ✅ 속성 정보 학습
-        attr_feat = self.attr_relu1(self.attr_conv1(x))
-        attr_feat = self.attr_relu2(self.attr_conv2(attr_feat))
-        attr_feat = torch.cat([attr_feat, x], dim=1)  
-        attr_feat = self.attr_dim_adjust(attr_feat)  
-
-        # ✅ 텍스처 정보 학습
-        texture_feat = self.texture_relu(self.texture_conv1(hard_neg))
-        texture_feat = self.texture_conv2(texture_feat)
-        texture_feat = texture_feat * attr_feat  # Element-wise Multiplication
-
-        # ✅ Query, Key, Value 생성 (속성 & 텍스처 각각 따로 생성)
-        attr_feat = attr_feat.view(b, c, -1).permute(0, 2, 1)  # (B, HW, C)
-        texture_feat = texture_feat.view(b, c, -1).permute(0, 2, 1)  # (B, HW, C)
-
-        Q_attr = self.query_attr(attr_feat)  
-        K_attr = self.key_attr(attr_feat)  
-        V_attr = self.value_attr(attr_feat)  
-
-        Q_tex = self.query_tex(texture_feat)  
-        K_tex = self.key_tex(texture_feat)  
-        V_tex = self.value_tex(texture_feat)  
-
-        # ✅ Multi-Head Cross Attention 적용
-        attention_scores_attr = torch.softmax(Q_attr @ K_attr.transpose(-2, -1) / (self.in_dim ** 0.5), dim=-1)
-        attn_output_attr = attention_scores_attr @ V_attr  
-
-        attention_scores_tex = torch.softmax(Q_tex @ K_tex.transpose(-2, -1) / (self.in_dim ** 0.5), dim=-1)
-        attn_output_tex = attention_scores_tex @ V_tex  
-
-        # ✅ 속성과 텍스처 정보를 가중치 조합
-        attn_output = self.alpha * attn_output_attr + (1 - self.alpha) * attn_output_tex
-
-        # ✅ 원래 크기로 복구
+        attn_scores = torch.softmax(Q @ K.transpose(-2, -1) / (self.in_dim ** 0.5), dim=-1)
+        attn_output = attn_scores @ V
         attn_output = attn_output.permute(0, 2, 1).view(b, c, h, w)
-        attn_output = self.output_proj(attn_output)
 
-        # ✅ BatchNorm 적용 후 Residual 연결
-        attn_output = self.norm(attn_output + x)  
+        return self.output_proj(attn_output + x)
 
-        return attn_output
+
+# ✅ 최종 모델
+class DistortionDetectionModel(nn.Module):
+    def __init__(self):
+        super(DistortionDetectionModel, self).__init__()
+
+        self.vgg = VGG16FeatureExtractor()
+        self.sa = SpatialAttention(64)
+        self.cpfe = CPFE(512, 64)
+        self.ca = ChannelwiseAttention(64)
+        self.hnca = HardNegativeCrossAttention(64)
+
+        self.upsample = nn.Upsample(size=(224, 224), mode='bilinear', align_corners=True)
+        self.final_conv = nn.Conv2d(128, 1, kernel_size=3, padding=1)
+
+    def forward(self, x):
+        feat1, feat2, feat3, feat4, feat5 = self.vgg(x)
+        low_feat = self.sa(feat1) * feat1
+        high_feat = self.hnca(self.cpfe(feat5))
+        high_feat = self.ca(high_feat) * high_feat
+        high_feat = self.upsample(high_feat)
+
+        print(f"Low_feat: {low_feat.shape}, High_feat: {high_feat.shape}")  # ✅ 크기 확인
+
+        fused_feat = torch.cat([low_feat, high_feat], dim=1)
+        output = self.final_conv(fused_feat)
+        return output.view(output.shape[0], -1).mean(dim=1)  # ✅ (batch_size, 1, 224, 224) → (batch_size,)
+
+
+
+def distortion_loss(pred, gt):
+    """
+    `pred`: (batch_size,) → MOS 점수와 비교
+    `gt`: (batch_size,) → MOS 점수
+    """
+    mse_loss = nn.MSELoss()(pred, gt)  # ✅ MOS 값과 직접 비교
+    perceptual_loss = torch.mean(torch.abs(pred - gt))  # ✅ L1 Loss 추가
+    return mse_loss + 0.1 * perceptual_loss
+
+
+# ✅ 테스트 코드
+if __name__ == "__main__":
+    dummy_input = torch.randn(2, 3, 224, 224)  # ✅ 입력 크기 224x224로 설정
+    dummy_gt = torch.randn(2)  # ✅ MOS 점수 (batch_size,) 형태로 생성
+    model = DistortionDetectionModel()
+    output = model(dummy_input)
+    
+    loss = distortion_loss(output, dummy_gt)  # ✅ 크기 맞춤 후 손실 계산
+
+    print("Model Output Shape:", output.shape)  # ✅ (batch_size,)가 출력되어야 함
+    print("Loss:", loss.item())
