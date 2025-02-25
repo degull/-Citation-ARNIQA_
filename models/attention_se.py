@@ -311,9 +311,10 @@ if __name__ == "__main__":
     print("Loss:", loss.item())
 
 
-""" 
+
+
 #  수정모델3
-import torch
+""" import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
