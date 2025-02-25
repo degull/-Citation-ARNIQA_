@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 import numpy as np
@@ -47,11 +47,12 @@ class KONIQ10KDataset(Dataset):
         print(f"[Debug] Phase: {self.phase}")
         print(f"[Debug] Total Records: {len(self.image_paths)}")
 
-        # ✅ 기본 이미지 변환 정의
-        self.transform = transforms.Compose([
+
+    def transform(self, image: Image) -> torch.Tensor:
+        return transforms.Compose([
             transforms.Resize((self.crop_size, self.crop_size)),
             transforms.ToTensor(),
-        ])
+        ])(image)
 
     def __getitem__(self, index: int):
         image_path = self.image_paths[index]
@@ -72,3 +73,17 @@ class KONIQ10KDataset(Dataset):
 
     def __len__(self):
         return len(self.image_paths)
+
+# ✅ 데이터셋 테스트 코드
+if __name__ == "__main__":
+    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
+
+    dataset = KONIQ10KDataset(root=dataset_path, phase="train", crop_size=224)
+    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
+
+    print(f"Dataset size: {len(dataset)}")
+
+    # ✅ 첫 번째 배치 확인
+    sample_batch = next(iter(dataloader))
+    print(f"Sample Image Shape: {sample_batch['img_A'].shape}")
+    print(f"Sample MOS Scores: {sample_batch['mos']}")
