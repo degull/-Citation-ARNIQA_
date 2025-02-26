@@ -1,4 +1,4 @@
-""" import os
+import os
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -54,8 +54,10 @@ if __name__ == "__main__":
     # ✅ 첫 번째 배치 확인
     sample_batch = next(iter(dataloader))
     print(f"Sample Image Shape: {sample_batch['img_A'].shape}")
-    print(f"Sample MOS Scores: {sample_batch['mos']}") """
+    print(f"Sample MOS Scores: {sample_batch['mos']}")
 
+
+""" 
 import os
 import pandas as pd
 import torch
@@ -127,3 +129,4 @@ if __name__ == "__main__":
     assert 0 <= sample_batch["mos"].max().item() <= 1, "⚠️ MOS 값 정규화 필요!"
 
     print("🚀 **KADID10K 데이터셋 테스트 완료!** 🚀")
+ """

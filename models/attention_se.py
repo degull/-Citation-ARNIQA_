@@ -287,8 +287,6 @@ class EnhancedDistortionDetectionModel(nn.Module):
         fused_feat = torch.cat([low_feat, high_feat], dim=1)
         output = self.final_conv(fused_feat)
 
-        output = torch.sigmoid(output)
-
         return output.view(output.shape[0], -1).mean(dim=1)
 
 

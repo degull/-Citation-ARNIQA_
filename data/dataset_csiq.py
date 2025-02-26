@@ -1,4 +1,4 @@
-""" import os
+import os
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -71,7 +71,10 @@ if __name__ == "__main__":
     # 경로 존재 여부 확인
     print(f"✅ CSIQ.txt 경로 확인: {scores_txt_path}")
     print(f"✅ CSIQ.txt 존재 여부: {os.path.isfile(scores_txt_path)}")
- """
+
+
+
+""" 
 import os
 import pandas as pd
 import torch
@@ -154,3 +157,4 @@ if __name__ == "__main__":
     print(f"🔹 MOS 범위: {sample_batch['mos'].min().item()} ~ {sample_batch['mos'].max().item()}")
 
     print("🚀 **CSIQ 데이터셋 테스트 완료!** 🚀")
+ """

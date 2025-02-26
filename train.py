@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 from pathlib import Path
 from scipy import stats
-from data.dataset_koniq10k import KONIQ10KDataset
+from data.dataset_kadid10k import KADID10KDataset
 from models.attention_se import EnhancedDistortionDetectionModel
 from utils.utils import load_config
 
@@ -134,7 +134,7 @@ if __name__ == "__main__":
 
     # ✅ 데이터셋 로드
     dataset_path = Path(args.data_base_path)
-    dataset = KONIQ10KDataset(str(dataset_path), crop_size=224)
+    dataset = KADID10KDataset(str(dataset_path), crop_size=224)
 
 
     train_size = int(0.7 * len(dataset))
@@ -174,43 +174,91 @@ if __name__ == "__main__":
 
     print("🔹 **Final Test Metrics:** 🔹", test_metrics)
 
-
-""" import torch
+    
+""" 
+import os
+import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 import numpy as np
-from tqdm import tqdm
 from pathlib import Path
 from scipy import stats
+from tqdm import tqdm
+from utils.utils import load_config
 from data.dataset_kadid10k import KADID10KDataset
 from data.dataset_csiq import CSIQDataset
-from models.attention_se import EnhancedDistortionDetectionModel
-from utils.utils import load_config
+from models.attention_se import EnhancedDistortionDetectionModel  # ✅ Feature Extractor
 
-# ✅ 손실 함수 (MSE + Perceptual Loss)
-def distortion_loss(pred, gt):
-    mse_loss = nn.MSELoss()(pred, gt)
-    perceptual_loss = torch.mean(torch.abs(pred - gt))
-    return mse_loss + 0.1 * perceptual_loss
+# ✅ Regressor 추가
+class IQARegressor(nn.Module):
+    def __init__(self, feature_dim=512):
+        super(IQARegressor, self).__init__()
+        self.regressor = nn.Sequential(
+            nn.Linear(feature_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1)  # 최종 MOS 예측값 출력
+        )
 
-# ✅ SROCC 및 PLCC 계산
+    def forward(self, x):
+        return self.regressor(x)
+
+# ✅ 모델 저장 함수
+def save_checkpoint(model, checkpoint_path, epoch, srocc):
+    filename = f"epoch_{epoch}_srocc_{srocc:.3f}.pth"
+    torch.save(model.state_dict(), checkpoint_path / filename)
+
+# ✅ SROCC 및 PLCC 계산 함수
 def calculate_srcc_plcc(preds, targets):
+    if torch.isnan(preds).any() or torch.isnan(targets).any():
+        return np.nan, np.nan  # NaN이 포함된 경우 NaN 반환
+    
     preds, targets = preds.cpu().numpy(), targets.cpu().numpy()
     srocc, _ = stats.spearmanr(preds.flatten(), targets.flatten())
     plcc, _ = stats.pearsonr(preds.flatten(), targets.flatten())
     return srocc, plcc
 
-# ✅ 학습 루프
-def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, device):
-    best_srocc = -1
-    model.train()
+# ✅ 검증 루프
+def validate(feature_extractor, regressor, dataloader, device):
+    feature_extractor.eval()
+    regressor.eval()
+    srocc_values, plcc_values = [], []
 
-    train_losses = []
-    val_srocc_values, val_plcc_values = [], []
-    test_srocc_values, test_plcc_values = [], []  # ✅ 테스트 결과 저장
+    with torch.no_grad():
+        for batch in dataloader:
+            img_A = batch["img_A"].to(device)
+            targets = batch["mos"].to(device)
+
+            features = feature_extractor(img_A)
+            preds = regressor(features).squeeze()
+
+            # ✅ NaN 체크 및 필터링
+            if torch.isnan(preds).any() or torch.isnan(targets).any():
+                print("[Warning] NaN detected in validation batch. Skipping...")
+                continue
+
+            srocc, plcc = calculate_srcc_plcc(preds, targets)
+
+            srocc_values.append(srocc)
+            plcc_values.append(plcc)
+
+    return np.nanmean(srocc_values), np.nanmean(plcc_values)
+
+# ✅ 학습 루프 (lr_scheduler이 None이면 step() 호출 안함)
+def train(args, feature_extractor, regressor, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, device):
+    checkpoint_path = Path(str(args.checkpoint_base_path))
+    checkpoint_path.mkdir(parents=True, exist_ok=True)
+    best_srocc = -1
+
+    train_metrics = {'loss': []}
+    val_metrics = {'srcc': [], 'plcc': []}
+    test_metrics_per_epoch = []  
 
     for epoch in range(args.training.epochs):
+        feature_extractor.train()
+        regressor.train()
         running_loss = 0.0
         progress_bar = tqdm(train_dataloader, desc=f"Epoch [{epoch + 1}/{args.training.epochs}]")
 
@@ -220,11 +268,18 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
 
             optimizer.zero_grad()
 
-            # ✅ 모델 예측
-            preds = model(img_A)
+            features = feature_extractor(img_A)
+            preds = regressor(features).squeeze()
 
-            # ✅ 손실 함수 계산
-            loss = distortion_loss(preds, targets)
+            if torch.isnan(preds).any() or torch.isnan(targets).any():
+                print("[Warning] NaN detected in batch. Skipping...")
+                continue
+
+            preds = torch.clamp(preds, min=0.0, max=1.0)
+            targets = torch.clamp(targets, min=0.0, max=1.0)
+
+            loss = nn.MSELoss()(preds, targets)
+
             loss.backward()
             optimizer.step()
 
@@ -232,59 +287,43 @@ def train(args, model, train_dataloader, val_dataloader, test_dataloader, optimi
             progress_bar.set_postfix(loss=running_loss / (len(progress_bar) + 1))
 
         avg_loss = running_loss / len(train_dataloader)
-        train_losses.append(avg_loss)
+        train_metrics['loss'].append(avg_loss)
 
-        # ✅ 검증
-        val_srocc, val_plcc = validate(model, val_dataloader, device)
-        val_srocc_values.append(val_srocc)
-        val_plcc_values.append(val_plcc)
+        val_srocc, val_plcc = validate(feature_extractor, regressor, val_dataloader, device)
+        val_metrics['srcc'].append(val_srocc)
+        val_metrics['plcc'].append(val_plcc)
 
-        # ✅ 테스트
-        test_metrics = test(model, test_dataloader, device)
-        test_srocc_values.append(test_metrics["srcc"])
-        test_plcc_values.append(test_metrics["plcc"])
+        test_metrics = test(feature_extractor, regressor, test_dataloader, device)
+        test_metrics_per_epoch.append(test_metrics)
 
-        # ✅ 모델 저장
+        avg_srcc = np.nanmean(test_metrics['srcc'])
+        avg_plcc = np.nanmean(test_metrics['plcc'])
+        print(f"Epoch {epoch + 1}: Test SRCC = {avg_srcc:.4f}, PLCC = {avg_plcc:.4f}")
+
+        # ✅ lr_scheduler이 None이 아니면 step() 실행
+        if lr_scheduler is not None:
+            lr_scheduler.step()
+
         if val_srocc > best_srocc:
             best_srocc = val_srocc
-            save_checkpoint(model, args.checkpoint_base_path, epoch, val_srocc)
+            save_checkpoint(regressor, checkpoint_path, epoch, val_srocc)
 
-        print(f"\n🔹 Epoch {epoch+1}: Loss: {avg_loss:.6f}, Val SROCC: {val_srocc:.6f}, Val PLCC: {val_plcc:.6f}, "
-              f"Test SROCC: {test_metrics['srcc']:.6f}, Test PLCC: {test_metrics['plcc']:.6f}")
+    print("Training completed.")
 
-        lr_scheduler.step()
+    print("\nFinal Test Metrics Per Epoch:")
+    for i, metrics in enumerate(test_metrics_per_epoch, 1):
+        avg_srcc = np.nanmean(metrics['srcc'])
+        avg_plcc = np.nanmean(metrics['plcc'])
+        print(f"Epoch {i}: SRCC = {avg_srcc:.4f}, PLCC = {avg_plcc:.4f}")
 
-    print("\n✅ **Training Completed** ✅")
+    return train_metrics, val_metrics, test_metrics_per_epoch
 
-    return {
-        "loss": train_losses,
-        "val_srocc": val_srocc_values,
-        "val_plcc": val_plcc_values,
-        "test_srocc": test_srocc_values,
-        "test_plcc": test_plcc_values
-    }
 
-# ✅ 검증 루프
-def validate(model, dataloader, device):
-    model.eval()
-    srocc_values, plcc_values = [], []
-
-    with torch.no_grad():
-        for batch in dataloader:
-            img_A = batch["img_A"].to(device)
-            targets = batch["mos"].to(device)
-
-            preds = model(img_A)
-            srocc, plcc = calculate_srcc_plcc(preds, targets)
-
-            srocc_values.append(srocc)
-            plcc_values.append(plcc)
-
-    return np.mean(srocc_values), np.mean(plcc_values)
 
 # ✅ 테스트 루프
-def test(model, test_dataloader, device):
-    model.eval()
+def test(feature_extractor, regressor, test_dataloader, device):
+    feature_extractor.eval()
+    regressor.eval()
     srocc_values, plcc_values = [], []
 
     with torch.no_grad():
@@ -292,83 +331,65 @@ def test(model, test_dataloader, device):
             img_A = batch["img_A"].to(device)
             targets = batch["mos"].to(device)
 
-            preds = model(img_A)
+            features = feature_extractor(img_A)
+            preds = regressor(features).squeeze()
 
-            # ✅ 모델 예측값 반전 (높을수록 낮게, 낮을수록 높게 변환)
-            preds = 1 - preds
+            # ✅ NaN 체크
+            if torch.isnan(preds).any() or torch.isnan(targets).any():
+                print("[Warning] NaN detected in test batch. Skipping...")
+                continue
 
             srocc, plcc = calculate_srcc_plcc(preds, targets)
 
             srocc_values.append(srocc)
             plcc_values.append(plcc)
 
-    return {"srcc": np.mean(srocc_values), "plcc": np.mean(plcc_values)}
+    return {"srcc": np.nanmean(srocc_values), "plcc": np.nanmean(plcc_values)}
 
-# ✅ 모델 저장 함수
-def save_checkpoint(model, checkpoint_path, epoch, srocc):
-    filename = f"epoch_{epoch}_srocc_{srocc:.3f}.pth"
-    torch.save(model.state_dict(), Path(checkpoint_path) / filename)
 
-# ✅ 메인 실행
-if __name__ == "__main__":
-    # ✅ 설정 파일 로드
-    config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
-    args = load_config(config_path)
-
-    # ✅ GPU 설정
-    device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
-
-    # KADID10KDataset 경로 설정 및 로드
+# ✅ 학습 데이터 로드
+def create_dataloaders(args):
     kadid_dataset_path = Path(str(args.data_base_path_kadid))
-    print(f"[Debug] KADID Dataset Path: {kadid_dataset_path}")
-    kadid_dataset = KADID10KDataset(str(kadid_dataset_path))
-
-    # CSIQDataset 경로 설정 및 로드
     csiq_dataset_path = Path(str(args.data_base_path_csiq))
-    print(f"[Debug] CSIQ Dataset Path: {csiq_dataset_path}")
+
+    kadid_dataset = KADID10KDataset(str(kadid_dataset_path))
     csiq_dataset = CSIQDataset(str(csiq_dataset_path))
 
-    # 훈련 데이터 분할
     train_size = int(0.8 * len(kadid_dataset))
     val_size = len(kadid_dataset) - train_size
     train_dataset, val_dataset = random_split(kadid_dataset, [train_size, val_size])
 
-    train_dataloader = DataLoader(
-        train_dataset, batch_size=args.training.batch_size, shuffle=True, num_workers=4
+    train_dataloader = DataLoader(train_dataset, batch_size=args.training.batch_size, shuffle=True, num_workers=4)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4)
+    test_dataloader = DataLoader(csiq_dataset, batch_size=args.test.batch_size, shuffle=False, num_workers=4)
+
+    return train_dataloader, val_dataloader, test_dataloader
+
+# ✅ 메인 실행
+if __name__ == "__main__":
+    config_path = "E:/ARNIQA - SE - mix/ARNIQA/config.yaml"
+    args = load_config(config_path)
+
+    device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+
+    train_dataloader, val_dataloader, test_dataloader = create_dataloaders(args)
+
+    feature_extractor = EnhancedDistortionDetectionModel().to(device)
+    regressor = IQARegressor(feature_dim=feature_extractor.feature_dim).to(device)
+
+    optimizer = optim.Adam(
+        list(feature_extractor.parameters()) + list(regressor.parameters()), 
+        lr=args.training.learning_rate
     )
-    val_dataloader = DataLoader(
-        val_dataset, batch_size=args.training.batch_size, shuffle=False, num_workers=4
-    )
 
-    # 테스트 데이터 로드
-    test_dataloader = DataLoader(
-        csiq_dataset, batch_size=args.test.batch_size, shuffle=False, num_workers=4
-    )
-
-    # ✅ 모델 생성
-    model = EnhancedDistortionDetectionModel().to(device)
-
-    # ✅ 옵티마이저 및 스케줄러 설정
-    optimizer = optim.SGD(model.parameters(), lr=args.training.learning_rate, momentum=0.9, weight_decay=1e-4)
-    lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-6)
-
-    # ✅ 모델 학습 실행
-    metrics = train(
-        args,
-        model,
-        train_dataloader,
-        val_dataloader,
-        test_dataloader,
+    # ✅ lr_scheduler 추가
+    lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer,
-        lr_scheduler,
-        device,
-    )
+        T_0=args.training.lr_scheduler.T_0,
+        T_mult=args.training.lr_scheduler.T_mult,
+        eta_min=args.training.lr_scheduler.eta_min
+    ) if hasattr(args.training, "lr_scheduler") else None  # ❗ `args.training.lr_scheduler`가 없으면 None 할당
 
-    # ✅ 최종 결과 출력
-    print("\nKADID & CSIQ - Final Test Metrics Per Epoch:")
-    for epoch in range(args.training.epochs):
-        print(f"Epoch {epoch + 1}: Val SROCC = {metrics['val_srocc'][epoch]:.4f}, "
-              f"Val PLCC = {metrics['val_plcc'][epoch]:.4f}, "
-              f"Test SROCC = {metrics['test_srocc'][epoch]:.4f}, "
-              f"Test PLCC = {metrics['test_plcc'][epoch]:.4f}")
- """
+    train_metrics, val_metrics, test_metrics = train(
+        args, feature_extractor, regressor, train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler, device
+    ) """

@@ -30,7 +30,7 @@ def mat_to_txt(mat_file, txt_file):
     print(f"Saved {mat_file} as {txt_file}")
 
 # .mat 파일 경로 설정
-mat_file_path = r"E:\ARNIQA - SE - mix\ARNIQA\dataset\LIVE\Data\AllMOS_release.mat"
+mat_file_path = r"E:\ARNIQA - SE - mix\ARNIQA\dataset\LIVE\refnames_all.mat"
 output_txt_path = os.path.splitext(mat_file_path)[0] + ".txt"  # 같은 경로에 .txt 저장
 
 # 변환 실행
