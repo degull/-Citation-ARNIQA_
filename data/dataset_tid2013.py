@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import torch
+import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
@@ -11,8 +12,7 @@ class TID2013Dataset(Dataset):
         """
         ✅ DistortionDetectionModel에 적합하도록 데이터셋 수정
         - `img_A`(왜곡된 이미지)만 반환
-        - `img_B`(참조 이미지) 제거
-        - `mos`(Mean Opinion Score) 점수 반환
+        - `mos`(Mean Opinion Score) 점수 반환 (0~1 정규화)
         """
         super().__init__()
         self.root = str(root)
@@ -26,9 +26,27 @@ class TID2013Dataset(Dataset):
 
         scores_data = pd.read_csv(scores_csv_path)
 
-        # ✅ 이미지 경로 설정 (img_A만 사용)
+        # ✅ MOS 값 로드 및 float 변환
+        self.mos = scores_data["mean"].astype(float).values
+
+        # ✅ MOS 값 검사 및 정리 (NaN/Inf 처리)
+        print(f"[Check] 총 MOS 값 개수: {len(self.mos)}")
+        print(f"[Check] NaN 개수: {np.isnan(self.mos).sum()}, Inf 개수: {np.isinf(self.mos).sum()}")
+
+        if np.isnan(self.mos).sum() > 0 or np.isinf(self.mos).sum() > 0:
+            self.mos = np.nan_to_num(self.mos, nan=0.5, posinf=1.0, neginf=0.0)  # NaN을 0.5로 대체
+
+        # ✅ MOS 값 정규화 (0~1 범위)
+        mos_min = np.min(self.mos)
+        mos_max = np.max(self.mos)
+        if mos_max - mos_min == 0:
+            raise ValueError("[Error] MOS 값의 최소값과 최대값이 동일하여 정규화할 수 없습니다.")
+
+        self.mos = (self.mos - mos_min) / (mos_max - mos_min)
+        print(f"[Check] MOS 최소값: {np.min(self.mos)}, 최대값: {np.max(self.mos)}")
+
+        # ✅ 이미지 파일 경로 설정
         self.image_paths = [os.path.join(self.root, "distorted_images", img) for img in scores_data["image_id"]]
-        self.mos = scores_data["mean"].astype(float).values  # MOS 값을 float로 변환
 
         print(f"[Debug] Phase: {self.phase}")
         print(f"[Debug] Total Records: {len(self.image_paths)}")

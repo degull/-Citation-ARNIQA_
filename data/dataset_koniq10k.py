@@ -1,16 +1,16 @@
 import os
 import pandas as pd
 import torch
+import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
-import numpy as np
 
 class KONIQ10KDataset(Dataset):
     def __init__(self, root: str, phase: str = "all", crop_size: int = 224):
         super().__init__()
         self.root = root
-        self.phase = phase.lower()
+        self.phase = phase.strip().lower()  # 🔹 공백 제거 후 소문자로 변환
         self.crop_size = crop_size
 
         # ✅ CSV 파일 로드
@@ -21,10 +21,15 @@ class KONIQ10KDataset(Dataset):
         scores_csv = pd.read_csv(scores_csv_path)
 
         self.images = scores_csv["image_name"].values
-        self.mos = scores_csv["MOS"].values.astype(np.float32)  # MOS 값을 float으로 변환
-        self.sets = scores_csv["set"].values
+        self.mos = scores_csv["MOS"].astype(float).values  # ✅ MOS 값을 float으로 변환
 
-        # ✅ MOS 값 검사 및 정리
+        # ✅ set 컬럼 변환 (소문자로 변환 후 'training' → 'train', 'validation' → 'val')
+        self.sets = scores_csv["set"].astype(str).str.strip().str.lower().replace({
+            "training": "train",
+            "validation": "val"
+        })
+
+        # ✅ MOS 값 검사 및 정리 (NaN/Inf 처리)
         print(f"[Check] 총 MOS 값 개수: {len(self.mos)}")
         print(f"[Check] NaN 개수: {np.isnan(self.mos).sum()}, Inf 개수: {np.isinf(self.mos).sum()}")
 
@@ -32,12 +37,23 @@ class KONIQ10KDataset(Dataset):
             self.mos = np.nan_to_num(self.mos, nan=0.5, posinf=1.0, neginf=0.0)  # NaN을 0.5로 대체
 
         # ✅ MOS 값 정규화 (0~1 범위)
-        self.mos = (self.mos - np.min(self.mos)) / (np.max(self.mos) - np.min(self.mos))
+        mos_min = np.min(self.mos)
+        mos_max = np.max(self.mos)
+        if mos_max - mos_min == 0:
+            raise ValueError("[Error] MOS 값의 최소값과 최대값이 동일하여 정규화할 수 없습니다.")
+
+        self.mos = (self.mos - mos_min) / (mos_max - mos_min)
         print(f"[Check] MOS 최소값: {np.min(self.mos)}, 최대값: {np.max(self.mos)}")
 
-        # ✅ 데이터 필터링
+        # ✅ 데이터 필터링 (train/val/test 선택)
         if self.phase != "all":
-            indices = [i for i, s in enumerate(self.sets) if s.strip().lower() == self.phase]
+            indices = [i for i, s in enumerate(self.sets) if s == self.phase]  # ✅ 비교 방식 수정
+
+            if len(indices) == 0:
+                print(f"[Error] '{self.phase}'에 해당하는 데이터가 없습니다. 'set' 컬럼 값 확인 필요.")
+                print(f"✅ set 컬럼 유니크 값: {self.sets.unique()}")  # 유니크한 값 출력
+                raise ValueError(f"[Error] '{self.phase}'에 해당하는 데이터가 없습니다.")
+
             self.images = self.images[indices]
             self.mos = self.mos[indices]
 
@@ -45,8 +61,7 @@ class KONIQ10KDataset(Dataset):
         self.image_paths = [os.path.join(self.root, "1024x768", img) for img in self.images]
 
         print(f"[Debug] Phase: {self.phase}")
-        print(f"[Debug] Total Records: {len(self.image_paths)}")
-
+        print(f"[Debug] Total Records: {len(self.image_paths)}")  # ✅ 데이터 개수 확인
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
@@ -73,6 +88,7 @@ class KONIQ10KDataset(Dataset):
 
     def __len__(self):
         return len(self.image_paths)
+
 
 # ✅ 데이터셋 테스트 코드
 if __name__ == "__main__":

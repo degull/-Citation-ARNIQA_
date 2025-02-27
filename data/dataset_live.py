@@ -8,13 +8,6 @@ import numpy as np
 
 class LIVEDataset(Dataset):
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
-        """
-        LIVE 데이터셋을 로드하는 클래스
-        Args:
-            root (str): 데이터셋 루트 경로
-            phase (str): "train", "val", "test" 중 선택
-            crop_size (int): 이미지 크롭 크기
-        """
         super().__init__()
         self.root = root
         self.phase = phase
@@ -27,35 +20,44 @@ class LIVEDataset(Dataset):
         if not os.path.isfile(dmos_path) or not os.path.isfile(refnames_path):
             raise FileNotFoundError(f"LIVE 데이터셋의 dmos.mat 또는 refnames_all.mat 파일이 존재하지 않습니다.")
 
-        # ✅ MOS 점수 로드 (0~100 범위)
+        # ✅ MOS 점수 로드 (총 982개)
         mat_data = scipy.io.loadmat(dmos_path)
-        dmos = mat_data["dmos"][0]  # MOS 점수 (1D 배열)
+        dmos = mat_data["dmos"][0].astype(np.float32)  # MOS 점수 (1D 배열)
 
         # ✅ MOS 점수 정규화 (0~1 범위로 변환)
-        dmos = (dmos - dmos.min()) / (dmos.max() - dmos.min())
+        mos_min = np.min(dmos)
+        mos_max = np.max(dmos)
+        if mos_max - mos_min == 0:
+            raise ValueError("[Error] MOS 값의 최소값과 최대값이 동일하여 정규화할 수 없습니다.")
+
+        dmos = (dmos - mos_min) / (mos_max - mos_min)
+        print(f"[Check] MOS 최소값: {np.min(dmos)}, 최대값: {np.max(dmos)}")
 
         # ✅ 참조 이미지 파일명 로드
         ref_data = scipy.io.loadmat(refnames_path)
         ref_images = [str(ref[0]) for ref in ref_data["refnames_all"][0]]  # 리스트 변환
 
-        # ✅ 이미지 경로 매핑
+        # ✅ LIVE 데이터셋 설정
+        distortions = ["jp2k", "jpeg", "wn", "gblur", "fastfading"]
         self.image_paths = []
         self.mos = []
 
-        distortions = ["jp2k", "jpeg", "wn", "gblur", "fastfading"]
-        img_index = 0  # 이미지 인덱스
+        missing_files = 0  # 없는 파일 카운트
 
-        for i, ref_img in enumerate(ref_images):  # 참조 이미지 별 반복
-            for dist_type in distortions:
-                for level in range(1, 6):  # 각 왜곡당 5개 강도
-                    img_name = f"img{img_index + 1}.bmp"
-                    img_path = os.path.join(self.root, dist_type, img_name)
+        # ✅ 이미지 파일명과 MOS 점수를 직접 매핑
+        for img_index in range(len(dmos)):  # MOS 개수만큼 반복 (982개)
+            distortion_type = distortions[img_index % len(distortions)]  # 🚀 수정: 안전한 인덱싱
+            img_name = f"img{img_index + 1}.bmp"  # LIVE 데이터셋의 이미지명 패턴
 
-                    if os.path.isfile(img_path):  # 이미지 존재 확인
-                        self.image_paths.append(img_path)
-                        self.mos.append(float(dmos[img_index]))  # MOS 점수 저장
+            img_path = os.path.join(self.root, distortion_type, img_name)
 
-                    img_index += 1  # 이미지 인덱스 증가
+            if os.path.isfile(img_path):  # ✅ 존재하는 파일만 추가
+                self.image_paths.append(img_path)
+                self.mos.append(float(dmos[img_index]))  # MOS 점수 저장
+            else:
+                missing_files += 1  # 없는 파일 개수 증가
+
+        print(f"⚠️ {missing_files}개의 파일이 존재하지 않습니다.")  # ✅ 누락된 파일 개수 출력
 
     def transform(self, image: Image) -> torch.Tensor:
         """이미지 변환 (크기 조정 + 텐서 변환)"""
@@ -86,7 +88,7 @@ if __name__ == "__main__":
     dataset = LIVEDataset(root=dataset_path, phase="train", crop_size=224)
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
 
-    print(f"Dataset size: {len(dataset)}")
+    print(f"\n✅ 최종 Dataset 크기: {len(dataset)}")
 
     # ✅ 첫 번째 배치 확인
     sample_batch = next(iter(dataloader))

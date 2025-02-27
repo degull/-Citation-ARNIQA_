@@ -13,7 +13,7 @@ class CLIVEDataset(Dataset):
         ✅ DistortionDetectionModel에 적합하도록 데이터셋 수정
         - `img_A`(왜곡된 이미지)만 반환
         - `img_B`(참조 이미지) 제거
-        - `mos`(Mean Opinion Score) 점수 반환
+        - `mos`(Mean Opinion Score) 점수 반환 및 0-1 정규화
         """
         super().__init__()
         self.root = root
@@ -60,7 +60,12 @@ class CLIVEDataset(Dataset):
             self.mos = np.nan_to_num(self.mos, nan=0.5, posinf=1.0, neginf=0.0)  # NaN을 0.5로 대체
 
         # ✅ MOS 값 정규화 (0~1 범위)
-        self.mos = (self.mos - np.min(self.mos)) / (np.max(self.mos) - np.min(self.mos))
+        mos_min = np.min(self.mos)
+        mos_max = np.max(self.mos)
+        if mos_max - mos_min == 0:
+            raise ValueError("[Error] MOS 값의 최소값과 최대값이 동일하여 정규화할 수 없습니다.")
+
+        self.mos = (self.mos - mos_min) / (mos_max - mos_min)
         print(f"[Check] MOS 최소값: {np.min(self.mos)}, 최대값: {np.max(self.mos)}")
 
         print(f"[INFO] 로드된 이미지 개수: {len(self.image_paths)}, MOS 점수 개수: {len(self.mos)}")
@@ -107,4 +112,3 @@ if __name__ == "__main__":
     print(f"\n[Authentic] 샘플 확인:")
     for i in range(4):  
         print(f"  Sample {i+1} - MOS: {sample_batch_authentic['mos'][i]}")
-
