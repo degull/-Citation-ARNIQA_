@@ -9,8 +9,8 @@ seed: 27
 #data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013"
 #unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013"
 
-data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
-unseen_distortipath: "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
+#data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
+#unseen_distortipath: "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
 
 
 #data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
@@ -23,8 +23,8 @@ unseen_distortipath: "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
 #unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CLIVE"
 
 
-#data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
-#unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
+data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
+unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KONIQ10K"
 
 data_base_path_kadid: "E:/ARNIQA - SE - mix/ARNIQA/dataset/KADID10K"
 data_base_path_tid: "E:/ARNIQA - SE - mix/ARNIQA/dataset/TID2013"
@@ -41,7 +41,7 @@ checkpoint_frequency: 1
 # Training settings
 training:
   epochs: 30
-  learning_rate: !!float 1e-3
+  learning_rate: !!float 1e-4
   batch_size: 16
   num_workers: 20
   log_images_frequency: 1000

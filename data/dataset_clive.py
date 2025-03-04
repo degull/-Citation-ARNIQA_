@@ -1,3 +1,4 @@
+# only img_a
 import os
 import torch
 import pandas as pd
@@ -9,12 +10,12 @@ from torchvision import transforms
 
 class CLIVEDataset(Dataset):
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
-        """
-        ✅ DistortionDetectionModel에 적합하도록 데이터셋 수정
-        - `img_A`(왜곡된 이미지)만 반환
-        - `img_B`(참조 이미지) 제거
-        - `mos`(Mean Opinion Score) 점수 반환 및 0-1 정규화
-        """
+        
+        #✅ DistortionDetectionModel에 적합하도록 데이터셋 수정
+        #- `img_A`(왜곡된 이미지)만 반환
+        #- `img_B`(참조 이미지) 제거
+        #- `mos`(Mean Opinion Score) 점수 반환 및 0-1 정규화
+        
         super().__init__()
         self.root = root
         self.phase = phase
@@ -76,9 +77,7 @@ class CLIVEDataset(Dataset):
         ])
 
     def __getitem__(self, index: int):
-        """
-        ✅ `img_A`(왜곡된 이미지)와 `mos`(Mean Opinion Score)만 반환
-        """
+
         try:
             img_A = Image.open(self.image_paths[index]).convert("RGB")  # ✅ 원본 이미지 사용
         except Exception as e:
@@ -97,9 +96,8 @@ class CLIVEDataset(Dataset):
 
 
 if __name__ == "__main__":
-    """
-    ✅ LIVE-Challenge는 Authentic 데이터셋이므로 Hard Negative 없이 원본 이미지만 사용.
-    """
+    
+    # ✅ LIVE-Challenge는 Authentic 데이터셋이므로 Hard Negative 없이 원본 이미지만 사용.
     dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/CLIVE"
 
     authentic_dataset = CLIVEDataset(root=dataset_path, phase="training", crop_size=224)

@@ -1,3 +1,4 @@
+# only img_a
 import os
 import pandas as pd
 import torch
