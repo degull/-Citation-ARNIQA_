@@ -1128,7 +1128,7 @@ import numpy as np
 from tqdm import tqdm
 from pathlib import Path
 from scipy import stats
-from data.dataset_kadid10k import KADID10KDataset
+from data.dataset_csiq import CSIQDataset
 from models.attention_se import EnhancedDistortionDetectionModel
 from utils.utils import load_config
 
@@ -1256,7 +1256,7 @@ if __name__ == "__main__":
 
     # ✅ 데이터셋 로드
     dataset_path = Path(args.data_base_path)
-    dataset = KADID10KDataset(str(dataset_path), crop_size=224)
+    dataset = CSIQDataset(str(dataset_path), crop_size=224)
 
 
     train_size = int(0.7 * len(dataset))
