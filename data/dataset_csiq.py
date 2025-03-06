@@ -1,10 +1,10 @@
 import os
 import pandas as pd
 import torch
-import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
+import os
 
 class CSIQDataset(Dataset):
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
@@ -29,15 +29,6 @@ class CSIQDataset(Dataset):
         self.image_paths = [os.path.join(self.root, img_path.replace("CSIQ/", "")) for img_path in scores_data["dist_img"]]
         self.mos = scores_data["mos"].astype(float).values  # MOS 값을 float로 변환
 
-        # ✅ MOS 값 정규화 (0~1 범위)
-        mos_min = np.min(self.mos)
-        mos_max = np.max(self.mos)
-        if mos_max - mos_min == 0:
-            raise ValueError("[Error] MOS 값의 최소값과 최대값이 동일하여 정규화할 수 없습니다.")
-
-        self.mos = (self.mos - mos_min) / (mos_max - mos_min)
-        print(f"[Check] MOS 최소값: {np.min(self.mos)}, 최대값: {np.max(self.mos)}")
-
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
             transforms.Resize((self.crop_size, self.crop_size)),
@@ -45,6 +36,7 @@ class CSIQDataset(Dataset):
         ])(image)
 
     def __getitem__(self, index: int):
+
         img_A = Image.open(self.image_paths[index]).convert("RGB")  
         img_A = self.transform(img_A)
 
@@ -70,6 +62,16 @@ if __name__ == "__main__":
     sample_batch = next(iter(dataloader))
     print(f"Sample Image Shape: {sample_batch['img_A'].shape}")
     print(f"Sample MOS Scores: {sample_batch['mos']}")
+
+
+
+    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
+    scores_txt_path = os.path.join(dataset_path, "CSIQ.txt")
+
+    # 경로 존재 여부 확인
+    print(f"✅ CSIQ.txt 경로 확인: {scores_txt_path}")
+    print(f"✅ CSIQ.txt 존재 여부: {os.path.isfile(scores_txt_path)}")
+
 
 
 """ 
