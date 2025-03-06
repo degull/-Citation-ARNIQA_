@@ -1,4 +1,3 @@
-# only img_a
 import os
 import torch
 import pandas as pd
@@ -10,12 +9,12 @@ from torchvision import transforms
 
 class CLIVEDataset(Dataset):
     def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
-        
-        #✅ DistortionDetectionModel에 적합하도록 데이터셋 수정
-        #- `img_A`(왜곡된 이미지)만 반환
-        #- `img_B`(참조 이미지) 제거
-        #- `mos`(Mean Opinion Score) 점수 반환 및 0-1 정규화
-        
+        """
+        ✅ DistortionDetectionModel에 적합하도록 데이터셋 수정
+        - `img_A`(왜곡된 이미지)만 반환
+        - `img_B`(참조 이미지) 제거
+        - `mos`(Mean Opinion Score) 점수 반환
+        """
         super().__init__()
         self.root = root
         self.phase = phase
@@ -61,12 +60,7 @@ class CLIVEDataset(Dataset):
             self.mos = np.nan_to_num(self.mos, nan=0.5, posinf=1.0, neginf=0.0)  # NaN을 0.5로 대체
 
         # ✅ MOS 값 정규화 (0~1 범위)
-        mos_min = np.min(self.mos)
-        mos_max = np.max(self.mos)
-        if mos_max - mos_min == 0:
-            raise ValueError("[Error] MOS 값의 최소값과 최대값이 동일하여 정규화할 수 없습니다.")
-
-        self.mos = (self.mos - mos_min) / (mos_max - mos_min)
+        self.mos = (self.mos - np.min(self.mos)) / (np.max(self.mos) - np.min(self.mos))
         print(f"[Check] MOS 최소값: {np.min(self.mos)}, 최대값: {np.max(self.mos)}")
 
         print(f"[INFO] 로드된 이미지 개수: {len(self.image_paths)}, MOS 점수 개수: {len(self.mos)}")
@@ -77,7 +71,9 @@ class CLIVEDataset(Dataset):
         ])
 
     def __getitem__(self, index: int):
-
+        """
+        ✅ `img_A`(왜곡된 이미지)와 `mos`(Mean Opinion Score)만 반환
+        """
         try:
             img_A = Image.open(self.image_paths[index]).convert("RGB")  # ✅ 원본 이미지 사용
         except Exception as e:
@@ -96,8 +92,9 @@ class CLIVEDataset(Dataset):
 
 
 if __name__ == "__main__":
-    
-    # ✅ LIVE-Challenge는 Authentic 데이터셋이므로 Hard Negative 없이 원본 이미지만 사용.
+    """
+    ✅ LIVE-Challenge는 Authentic 데이터셋이므로 Hard Negative 없이 원본 이미지만 사용.
+    """
     dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/CLIVE"
 
     authentic_dataset = CLIVEDataset(root=dataset_path, phase="training", crop_size=224)

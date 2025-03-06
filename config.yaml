@@ -13,11 +13,14 @@ seed: 27
 #unseen_distortipath: "E:/ARNIQA - SE - mix/ARNIQA/dataset/SPAQ"
 
 
-data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
-unseen_distortipath: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
+#data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
+#unseen_distortipath: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
 
 #data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE"
 #unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/LIVE"
+
+data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/FLIVE"
+unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/FLIVE"
 
 #data_base_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CLIVE"
 #unseen_distortion_path: "E:/ARNIQA - SE - mix/ARNIQA/dataset/CLIVE"

@@ -7,3 +7,4 @@ from data.dataset_flive import FLIVEDataset
 from data.dataset_spaq import SPAQDataset
 from data.dataset_clive import CLIVEDataset
 from data.dataset_live import LIVEDataset
+from data.dataset_flive import FLIVEDataset
