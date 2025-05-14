@@ -4,30 +4,62 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
-import os
+import numpy as np
 
 class CSIQDataset(Dataset):
-    def __init__(self, root: str, phase: str = "train", crop_size: int = 224):
+    def __init__(self, root: str, phase: str = "all", crop_size: int = 224):
         super().__init__()
-        self.root = str(root)
-        self.phase = phase
+        self.root = root
+        self.phase = phase.lower()
         self.crop_size = crop_size
 
-        # ✅ CSIQ 데이터셋 경로 설정
-        scores_txt_path = os.path.join(self.root, "CSIQ.txt")
-        if not os.path.isfile(scores_txt_path):
-            raise FileNotFoundError(f"CSIQ TXT 파일이 {scores_txt_path} 경로에 존재하지 않습니다.")
+        # ✅ CSV 파일 로드
+        scores_csv_path = os.path.join(self.root, "CSIQ.txt")
+        if not os.path.isfile(scores_csv_path):
+            raise FileNotFoundError(f"CSV 파일이 {scores_csv_path} 경로에 존재하지 않습니다.")
 
-        # ✅ CSV 파일 로드 (구분자 `,` 사용)
-        scores_data = pd.read_csv(scores_txt_path, sep=',', names=["dist_img", "dist_type", "ref_img", "mos"], header=0)
+        scores_csv = pd.read_csv(scores_csv_path)
 
-        # 🔹 NaN 값 제거 후 문자열로 변환
-        scores_data.dropna(inplace=True)
-        scores_data = scores_data.astype(str)
+        # ✅ 이미지 이름과 MOS 값 가져오기
+        self.images = scores_csv["dis_img_path"].values
+        self.mos = scores_csv["score"].values.astype(np.float32)
+        self.sets = scores_csv["set"].values if "set" in scores_csv.columns else ["all"] * len(scores_csv)
 
-        # ✅ 이미지 경로 설정 (img_A만 사용)
-        self.image_paths = [os.path.join(self.root, img_path.replace("CSIQ/", "")) for img_path in scores_data["dist_img"]]
-        self.mos = scores_data["mos"].astype(float).values  # MOS 값을 float로 변환
+        # ✅ MOS 값 검사 및 정리
+        print(f"[Check] 총 MOS 값 개수: {len(self.mos)}")
+        print(f"[Check] NaN 개수: {np.isnan(self.mos).sum()}, Inf 개수: {np.isinf(self.mos).sum()}")
+
+        if np.isnan(self.mos).sum() > 0 or np.isinf(self.mos).sum() > 0:
+            self.mos = np.nan_to_num(self.mos, nan=0.5, posinf=1.0, neginf=0.0)
+
+        # ✅ MOS 값 정규화 (0~1 범위)
+        self.mos = (self.mos - np.min(self.mos)) / (np.max(self.mos) - np.min(self.mos))
+        print(f"[Check] MOS 최소값: {np.min(self.mos)}, 최대값: {np.max(self.mos)}")
+
+        # ✅ CSV 'set' 컬럼의 실제 값 확인
+        print("CSV 'set' 컬럼에 들어 있는 값 종류:", set(self.sets))
+
+        # ✅ 데이터 필터링 (train, test, val 구분이 없는 경우 전체 사용)
+        print(f"[Debug] 데이터 필터링 전 이미지 개수: {len(self.images)}")
+
+        if "all" in set(self.sets):  # 'all' 값이 있는 경우 모든 데이터를 사용
+            print("[Info] 'set' 컬럼이 'all'이므로 모든 데이터를 사용합니다.")
+        else:
+            if self.phase != "all":
+                indices = [i for i, s in enumerate(self.sets) if s.strip().lower() == self.phase]
+                print(f"[Debug] '{self.phase}'에 해당하는 데이터 개수: {len(indices)}")
+
+                if len(indices) == 0:
+                    raise ValueError(f"'{self.phase}'에 해당하는 데이터가 없습니다. CSV 'set' 컬럼 값을 확인하세요.")
+
+                self.images = self.images[indices]
+                self.mos = self.mos[indices]
+
+        # ✅ 올바른 이미지 경로 생성
+        self.image_paths = [os.path.join(self.root, img.replace("CSIQ/", "").replace("\\", "/")) for img in self.images]
+
+        print(f"[Debug] Phase: {self.phase}")
+        print(f"[Debug] Total Records: {len(self.image_paths)}")
 
     def transform(self, image: Image) -> torch.Tensor:
         return transforms.Compose([
@@ -36,13 +68,20 @@ class CSIQDataset(Dataset):
         ])(image)
 
     def __getitem__(self, index: int):
+        image_path = self.image_paths[index]
+        mos = self.mos[index]
 
-        img_A = Image.open(self.image_paths[index]).convert("RGB")  
-        img_A = self.transform(img_A)
+        try:
+            img_A = Image.open(image_path).convert("RGB")
+        except Exception as e:
+            print(f"[Error] 이미지 로드 실패: {image_path}: {e}")
+            return None
+
+        img_A_transformed = self.transform(img_A)
 
         return {
-            "img_A": img_A,
-            "mos": torch.tensor(self.mos[index], dtype=torch.float32),
+            "img_A": img_A_transformed,
+            "mos": torch.tensor(mos, dtype=torch.float32),
         }
 
     def __len__(self):
@@ -60,18 +99,11 @@ if __name__ == "__main__":
 
     # ✅ 첫 번째 배치 확인
     sample_batch = next(iter(dataloader))
-    print(f"Sample Image Shape: {sample_batch['img_A'].shape}")
-    print(f"Sample MOS Scores: {sample_batch['mos']}")
-
-
-
-    dataset_path = "E:/ARNIQA - SE - mix/ARNIQA/dataset/CSIQ"
-    scores_txt_path = os.path.join(dataset_path, "CSIQ.txt")
-
-    # 경로 존재 여부 확인
-    print(f"✅ CSIQ.txt 경로 확인: {scores_txt_path}")
-    print(f"✅ CSIQ.txt 존재 여부: {os.path.isfile(scores_txt_path)}")
-
+    if sample_batch is not None:
+        print(f"Sample Image Shape: {sample_batch['img_A'].shape}")
+        print(f"Sample MOS Scores: {sample_batch['mos']}")
+    else:
+        print("[Error] 데이터가 로드되지 않았습니다.")
 
 
 """ 

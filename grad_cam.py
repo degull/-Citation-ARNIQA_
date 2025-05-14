@@ -303,3 +303,52 @@ class GradCAM:
         plt.savefig(save_path)
         plt.close()
  """
+
+# 3/7
+""" import torch
+import torch.nn.functional as F
+import numpy as np
+import cv2
+from torchvision import transforms
+
+class GradCAM:
+    def __init__(self, model, target_layer):
+        self.model = model
+        self.target_layer = target_layer
+        self.gradient = None
+        self.activation = None
+
+        # ✅ Forward Hook: Feature Map 저장
+        self.target_layer.register_forward_hook(self.forward_hook)
+        # ✅ Backward Hook: Gradient 저장
+        self.target_layer.register_backward_hook(self.backward_hook)
+
+    def forward_hook(self, module, input, output):
+        self.activation = output  # Feature Map 저장
+
+    def backward_hook(self, module, grad_input, grad_output):
+        self.gradient = grad_output[0]  # Gradient 저장
+
+    def generate_cam(self, input_tensor, class_idx=None):
+        self.model.zero_grad()
+        output = self.model(input_tensor)[0]  # 품질 점수(quality_score) 추출
+        if class_idx is None:
+            class_idx = torch.argmax(output)  # 가장 높은 점수의 인덱스 사용
+        output[class_idx].backward()
+
+        # ✅ Grad-CAM 계산
+        weights = self.gradient.mean(dim=(2, 3), keepdim=True)  # GAP 적용
+        cam = (weights * self.activation).sum(dim=1, keepdim=True)  # Weighted Sum
+        cam = F.relu(cam)  # 음수 값 제거
+        cam = cam.squeeze().cpu().detach().numpy()
+
+        # ✅ Normalize
+        cam = (cam - cam.min()) / (cam.max() - cam.min())
+        return cam
+
+def apply_heatmap(image, cam, alpha=0.5):
+    cam = cv2.resize(cam, (image.shape[1], image.shape[0]))  # 이미지 크기 맞춤
+    heatmap = cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET)  # 색상 변환
+    overlay = cv2.addWeighted(image, 1 - alpha, heatmap, alpha, 0)  # 원본과 혼합
+    return overlay
+ """
